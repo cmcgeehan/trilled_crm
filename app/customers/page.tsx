@@ -1,87 +1,93 @@
 "use client"
 
-import { useState } from "react"
-import Link from "next/link"
-import { Input } from "@/components/ui/input"
+import { useState, useEffect } from "react"
+import { useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { Badge } from "@/components/ui/badge"
+import { supabase } from "@/lib/supabase"
+import { Database } from "@/types/supabase"
 
-// Mock data
-const customers = [
-  { id: 1, name: "John Doe", phone: "123-456-7890", email: "john@example.com", isLead: false, status: "New" },
-  { id: 2, name: "Jane Smith", phone: "098-765-4321", email: "jane@example.com", isLead: true, status: "Needs Action" },
-  {
-    id: 3,
-    name: "Alice Johnson",
-    phone: "555-555-5555",
-    email: "alice@example.com",
-    isLead: false,
-    status: "Follow Up",
-  },
-  {
-    id: 4,
-    name: "Bob Williams",
-    phone: "444-444-4444",
-    email: "bob@example.com",
-    isLead: true,
-    status: "Awaiting Response",
-  },
-]
+type Customer = Database['public']['Tables']['users']['Row'] & {
+  name?: string;
+  company?: string | null;
+}
 
 export default function CustomersPage() {
-  const [searchTerm, setSearchTerm] = useState("")
+  const [customers, setCustomers] = useState<Customer[]>([])
+  const [loading, setLoading] = useState(true)
+  const router = useRouter()
 
-  const filteredCustomers = customers.filter(
-    (customer) =>
-      customer.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      customer.phone.includes(searchTerm) ||
-      customer.email.toLowerCase().includes(searchTerm.toLowerCase()),
-  )
+  const loadCustomers = async () => {
+    try {
+      setLoading(true)
+      const { data, error } = await supabase
+        .from('users')
+        .select(`
+          *,
+          companies (
+            name
+          )
+        `)
+        .in('role', ['lead', 'customer'])
+        .is('deleted_at', null)
+        .order('created_at', { ascending: false })
+
+      if (error) {
+        console.error('Error loading customers:', error)
+        return
+      }
+
+      const formattedCustomers: Customer[] = (data || []).map(customer => ({
+        ...customer,
+        name: customer.first_name && customer.last_name ? `${customer.first_name} ${customer.last_name}` : customer.first_name || customer.last_name || undefined,
+        company: customer.companies?.name || null
+      }))
+
+      setCustomers(formattedCustomers)
+    } catch (err) {
+      console.error('Error loading customers:', err)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    loadCustomers()
+  }, [])
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center min-h-screen">
+        <p>Loading customers...</p>
+      </div>
+    )
+  }
 
   return (
-    <div className="space-y-4">
-      <h1 className="text-2xl font-bold">Customers</h1>
-      <Input
-        type="text"
-        placeholder="Search by name, phone, or email"
-        value={searchTerm}
-        onChange={(e) => setSearchTerm(e.target.value)}
-        className="max-w-md"
-      />
-      <Table>
-        <TableHeader>
-          <TableRow>
-            <TableHead>Name</TableHead>
-            <TableHead>Phone</TableHead>
-            <TableHead>Email</TableHead>
-            <TableHead>Type</TableHead>
-            <TableHead>Status</TableHead>
-            <TableHead>Action</TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {filteredCustomers.map((customer) => (
-            <TableRow key={customer.id}>
-              <TableCell>{customer.name}</TableCell>
-              <TableCell>{customer.phone}</TableCell>
-              <TableCell>{customer.email}</TableCell>
-              <TableCell>
-                <Badge variant={customer.isLead ? "secondary" : "default"}>
-                  {customer.isLead ? "Lead" : "Customer"}
-                </Badge>
-              </TableCell>
-              <TableCell>{customer.status}</TableCell>
-              <TableCell>
-                <Button asChild>
-                  <Link href={`/customers/${customer.id}`}>View Details</Link>
-                </Button>
-              </TableCell>
-            </TableRow>
-          ))}
-        </TableBody>
-      </Table>
+    <div className="container mx-auto py-6">
+      <div className="flex justify-between items-center mb-6">
+        <h1 className="text-2xl font-bold">Customers</h1>
+        <Button onClick={() => router.push('/customers/new')}>
+          Add Customer
+        </Button>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        {customers.map((customer) => (
+          <div
+            key={customer.id}
+            className="bg-white p-4 rounded-lg shadow hover:shadow-md transition-shadow cursor-pointer"
+            onClick={() => router.push(`/customers/${customer.id}`)}
+          >
+            <h2 className="text-lg font-semibold">{customer.name || 'Unnamed Customer'}</h2>
+            {customer.company && (
+              <p className="text-gray-600">{customer.company}</p>
+            )}
+            <p className="text-gray-500 mt-2">
+              {customer.email || customer.phone || 'No contact information'}
+            </p>
+          </div>
+        ))}
+      </div>
     </div>
   )
 }
-
