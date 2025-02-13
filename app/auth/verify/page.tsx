@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, Suspense } from 'react';
 import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Button } from '@/components/ui/button';
@@ -9,7 +9,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Label } from '@/components/ui/label';
 import { toast } from 'sonner';
 
-export default function VerifyInvite() {
+function VerifyInviteContent() {
   const [loading, setLoading] = useState(true);
   const [password, setPassword] = useState('');
   const [showPasswordForm, setShowPasswordForm] = useState(false);
@@ -28,7 +28,7 @@ export default function VerifyInvite() {
         }
 
         // Verify the invite token
-        const { error: verifyError, data } = await supabase.auth.verifyOtp({
+        const { error: verifyError } = await supabase.auth.verifyOtp({
           token_hash: token,
           type: 'invite',
         });
@@ -109,5 +109,17 @@ export default function VerifyInvite() {
         </CardContent>
       </Card>
     </div>
+  );
+}
+
+export default function VerifyInvite() {
+  return (
+    <Suspense fallback={
+      <div className="container flex items-center justify-center min-h-screen py-12">
+        <p>Loading...</p>
+      </div>
+    }>
+      <VerifyInviteContent />
+    </Suspense>
   );
 } 

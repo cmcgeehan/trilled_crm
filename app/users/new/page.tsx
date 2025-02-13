@@ -212,18 +212,6 @@ export default function NewUserPage() {
     }
   }
 
-  // Helper function to generate a temporary password
-  const generateTempPassword = () => {
-    const length = 12
-    const charset = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*'
-    let password = ''
-    for (let i = 0; i < length; i++) {
-      const randomIndex = Math.floor(Math.random() * charset.length)
-      password += charset[randomIndex]
-    }
-    return password
-  }
-
   // Helper function to calculate follow-up dates based on role
   const calculateFollowUpDates = (createdDate: Date, role: 'lead' | 'customer') => {
     const dates = []
