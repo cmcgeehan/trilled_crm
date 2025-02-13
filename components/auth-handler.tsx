@@ -11,15 +11,29 @@ export default function AuthHandler() {
 
   useEffect(() => {
     const handleInitialLoad = async () => {
-      // Check if this is a Supabase verification redirect
+      // Check URL hash for access token
+      if (typeof window !== 'undefined' && window.location.hash) {
+        const hashParams = new URLSearchParams(window.location.hash.substring(1))
+        const accessToken = hashParams.get('access_token')
+        const type = hashParams.get('type')
+
+        console.log('Hash params:', { accessToken: !!accessToken, type })
+
+        if (accessToken && type === 'invite') {
+          console.log('Found access token in hash, redirecting to verify')
+          router.push(`/auth/verify?token=${accessToken}&type=${type}`)
+          return
+        }
+      }
+
+      // Check query parameters for token
       const token = searchParams.get('token')
       const type = searchParams.get('type')
 
-      console.log('Auth handler params:', { token, type })
+      console.log('Query params:', { token: !!token, type })
 
       if (token && type === 'invite') {
-        // This is an invite verification, redirect to verify page
-        console.log('Detected invite verification, redirecting to verify page')
+        console.log('Found token in query params, redirecting to verify')
         router.push(`/auth/verify?token=${token}&type=${type}`)
         return
       }

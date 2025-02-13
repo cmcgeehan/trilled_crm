@@ -1,5 +1,5 @@
 import { Suspense } from "react"
-import AuthHandler from "@/components/auth-handler"
+import AuthHandler from "../components/auth-handler"
 
 export default function RootPage() {
   return (
