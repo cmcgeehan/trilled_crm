@@ -31,7 +31,7 @@ export async function POST(request: Request) {
     // Create and invite the user in one step
     const { data, error } = await adminClient.auth.admin.inviteUserByEmail(email, {
       data: userData,
-      redirectTo: `${process.env.NEXT_PUBLIC_SITE_URL}/auth/verify`
+      redirectTo: 'https://trilled-crm-git-main-cmcgeehans-projects.vercel.app'
     })
 
     if (error) {

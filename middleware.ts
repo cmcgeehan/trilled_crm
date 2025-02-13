@@ -4,6 +4,13 @@ import type { NextRequest } from 'next/server'
 
 export async function middleware(request: NextRequest) {
   try {
+    // Log the request details
+    console.log('Middleware handling request:', {
+      pathname: request.nextUrl.pathname,
+      search: request.nextUrl.search,
+      fullUrl: request.url
+    })
+
     // Create a response to modify
     const res = NextResponse.next()
     
@@ -15,25 +22,34 @@ export async function middleware(request: NextRequest) {
       data: { session },
     } = await supabase.auth.getSession()
 
+    // Check if this is an auth-related request (has token or type=invite)
+    const hasAuthParams = request.nextUrl.searchParams.has('token') || 
+                         request.nextUrl.searchParams.get('type') === 'invite'
+
     // Public routes that don't require authentication
-    const publicRoutes = ['/login', '/auth/callback']
+    const publicRoutes = ['/login', '/auth/callback', '/auth/verify', '/auth/initial-verify']
     const isPublicRoute = publicRoutes.some(route => request.nextUrl.pathname.startsWith(route))
 
-    // If we're not on a public route and there's no session, redirect to login
-    if (!isPublicRoute && !session) {
-      const redirectUrl = new URL('/login', request.url)
-      redirectUrl.searchParams.set('redirectTo', request.nextUrl.pathname)
-      return NextResponse.redirect(redirectUrl)
+    console.log('Auth check:', {
+      hasSession: !!session,
+      isPublicRoute,
+      hasAuthParams,
+      pathname: request.nextUrl.pathname
+    })
+
+    // Allow the request if:
+    // 1. It's a public route OR
+    // 2. It has auth-related parameters OR
+    // 3. User has a session
+    if (isPublicRoute || hasAuthParams || session) {
+      return res
     }
 
-    // If we're on the login page and we're already logged in, redirect to home
-    if (request.nextUrl.pathname === '/login' && session) {
-      const redirectTo = request.nextUrl.searchParams.get('redirectTo')
-      return NextResponse.redirect(new URL(redirectTo || '/', request.url))
-    }
-
-    // Return the response with the session cookie
-    return res
+    // Otherwise redirect to login
+    const redirectUrl = new URL('/login', request.url)
+    redirectUrl.searchParams.set('redirectTo', request.nextUrl.pathname)
+    console.log('Redirecting to login:', redirectUrl.toString())
+    return NextResponse.redirect(redirectUrl)
 
   } catch (e) {
     // If there's an error, redirect to login

@@ -29,6 +29,16 @@ export function OrganizationProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     const checkSession = async () => {
       try {
+        // Get the current path
+        const path = window.location.pathname
+
+        // List of public routes that don't require a session
+        const publicRoutes = ['/login', '/signup', '/auth/verify', '/auth/callback']
+        if (publicRoutes.includes(path)) {
+          setContextLoading(false)
+          return
+        }
+
         const { data: { session } } = await supabase.auth.getSession()
         if (!session) {
           console.log('No session found, redirecting to login')
