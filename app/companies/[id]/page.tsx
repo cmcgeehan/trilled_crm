@@ -82,6 +82,7 @@ export default function CompanyDetailsPage({ params }: { params: Promise<{ id: s
   const [error, setError] = useState<string | null>(null)
   const [editedCompany, setEditedCompany] = useState<Company | null>(null)
   const [currentUserRole, setCurrentUserRole] = useState<string | null>(null)
+  const [currentOrganizationId, setCurrentOrganizationId] = useState<string | null>(null)
   const [isDeleting, setIsDeleting] = useState(false)
   const [deleteError, setDeleteError] = useState<string | null>(null)
   const [isMarkingAsLost, setIsMarkingAsLost] = useState(false)
@@ -94,11 +95,17 @@ export default function CompanyDetailsPage({ params }: { params: Promise<{ id: s
         setLoading(true)
         
         // Load company details
-        const { data: companyData, error: companyError } = await supabase
+        let query = supabase
           .from('companies')
           .select('*')
           .eq('id', id)
-          .single()
+
+        // Apply organization filter for non-super admins
+        if (currentUserRole !== 'super_admin') {
+          query = query.eq('organization_id', currentOrganizationId)
+        }
+
+        const { data: companyData, error: companyError } = await query.single()
 
         if (companyError) throw companyError
         if (!companyData) throw new Error('Company not found')
@@ -107,12 +114,19 @@ export default function CompanyDetailsPage({ params }: { params: Promise<{ id: s
         setEditedCompany(companyData as Company)
 
         // Load associated users
-        const { data: usersData, error: usersError } = await supabase
+        let usersQuery = supabase
           .from('users')
           .select('*')
           .eq('company_id', id)
           .is('deleted_at', null)
           .order('created_at', { ascending: false })
+
+        // Apply organization filter for non-super admins
+        if (currentUserRole !== 'super_admin') {
+          usersQuery = usersQuery.eq('organization_id', currentOrganizationId)
+        }
+
+        const { data: usersData, error: usersError } = await usersQuery
 
         if (usersError) throw usersError
         setUsers(usersData || [])
@@ -125,8 +139,10 @@ export default function CompanyDetailsPage({ params }: { params: Promise<{ id: s
       }
     }
 
-    loadCompanyAndUsers()
-  }, [id])
+    if (currentUserRole !== null) {
+      loadCompanyAndUsers()
+    }
+  }, [id, currentUserRole, currentOrganizationId])
 
   useEffect(() => {
     const checkSession = async () => {
@@ -138,15 +154,16 @@ export default function CompanyDetailsPage({ params }: { params: Promise<{ id: s
           return
         }
 
-        // Get current user's role
+        // Get current user's role and organization
         const { data: userData } = await supabase
           .from('users')
-          .select('role')
+          .select('role, organization_id')
           .eq('id', session.user.id)
           .single()
         
         if (userData) {
           setCurrentUserRole(userData.role)
+          setCurrentOrganizationId(userData.organization_id)
         }
       } catch (error) {
         console.error('Error checking session:', error)
@@ -162,7 +179,7 @@ export default function CompanyDetailsPage({ params }: { params: Promise<{ id: s
 
     try {
       setLoading(true)
-      const { error: updateError } = await supabase
+      let query = supabase
         .from('companies')
         .update({
           name: editedCompany.name,
@@ -175,6 +192,13 @@ export default function CompanyDetailsPage({ params }: { params: Promise<{ id: s
           country: editedCompany.country,
         })
         .eq('id', id)
+
+      // Apply organization filter for non-super admins
+      if (currentUserRole !== 'super_admin') {
+        query = query.eq('organization_id', currentOrganizationId)
+      }
+
+      const { error: updateError } = await query
 
       if (updateError) throw updateError
 

@@ -37,146 +37,17 @@ export default function UsersPage() {
   const [searchTerm, setSearchTerm] = useState("")
   const [users, setUsers] = useState<User[]>([])
   const [loading, setLoading] = useState(true)
+  const [dataLoading, setDataLoading] = useState(true)
   const [sortField, setSortField] = useState<SortField>('created_at')
   const [sortOrder, setSortOrder] = useState<SortOrder>('desc')
-  const [roleFilter, setRoleFilter] = useState<UserRole | null>('lead')
+  const [roleFilter, setRoleFilter] = useState<UserRole | null>(null)
   const [statusFilter, setStatusFilter] = useState<UserStatus | null>(null)
   const [ownerFilter, setOwnerFilter] = useState<string>('all')
   const [currentUser, setCurrentUser] = useState<User | null>(null)
   const [agents, setAgents] = useState<User[]>([])
   const [currentUserRole, setCurrentUserRole] = useState<UserRole | null>(null)
-
-  useEffect(() => {
-    const loadCurrentUser = async () => {
-      try {
-        const { data: { user: authUser }, error: authError } = await supabase.auth.getUser()
-        console.log('Session Data:', { authUser })
-        
-        if (authError || !authUser?.id) {
-          console.error('Error getting auth user:', authError)
-          return
-        }
-
-        const { data: userData, error: userError } = await supabase
-          .from('users')
-          .select()
-          .eq('id', authUser.id)
-          .is('deleted_at', null)
-          .maybeSingle()
-          
-        if (userError) {
-          console.error('Error loading current user:', userError)
-          return
-        }
-          
-        if (!userData) {
-          const { data: newUser, error: createError } = await supabase
-            .from('users')
-            .insert({
-              id: authUser.id,
-              email: authUser.email,
-              role: 'lead',
-              status: 'new' as UserStatus
-            })
-            .select()
-            .single()
-            
-          if (createError) {
-            console.error('Error creating user:', createError)
-            return
-          }
-            
-          setCurrentUser(newUser as User)
-          if (['agent', 'admin', 'super_admin'].includes(newUser.role) && newUser.id) {
-            handleOwnerFilterChange(newUser.id)
-          }
-        } else {
-          setCurrentUser(userData as User)
-          if (['agent', 'admin', 'super_admin'].includes(userData.role) && userData.id) {
-            handleOwnerFilterChange(userData.id)
-          }
-        }
-      } catch (err) {
-        console.error('Error loading current user:', err)
-      }
-    }
-    loadCurrentUser()
-  }, [])
-
-  useEffect(() => {
-    const loadAgents = async () => {
-      try {
-        const { data, error } = await supabase
-          .from('users')
-          .select('*')
-          .not('role', 'in', '("lead","customer")')
-          .is('deleted_at', null)
-          .order('role')
-        
-        if (error) {
-          console.error('Error loading agents:', error)
-          return
-        }
-        
-        setAgents((data || []) as User[])
-      } catch (err) {
-        console.error('Error loading agents:', err)
-      }
-    }
-
-    loadAgents()
-  }, [])
-
-  useEffect(() => {
-    const loadUsers = async () => {
-      try {
-        setLoading(true)
-        let query = supabase
-          .from('users')
-          .select(`
-            *,
-            companies (
-              name
-            ),
-            position
-          `)
-          .is('deleted_at', null)
-
-        if (roleFilter) {
-          query = query.eq('role', roleFilter)
-        }
-        if (statusFilter) {
-          query = query.eq('status', statusFilter)
-        }
-        if (ownerFilter !== 'all') {
-          query = query.eq('owner_id', ownerFilter)
-        } else if (currentUser?.role !== 'admin' && currentUser?.role !== 'super_admin' && currentUser?.id) {
-          query = query.eq('owner_id', currentUser.id)
-        }
-
-        query = query.order(sortField, { ascending: sortOrder === 'asc' })
-        
-        const { data, error } = await query
-        
-        if (error) {
-          console.error('Error loading users:', error)
-          return
-        }
-        
-        const usersWithCompanyNames = (data || []).map(user => ({
-          ...user,
-          company_name: user.companies?.name
-        }))
-        
-        setUsers(usersWithCompanyNames as User[])
-      } catch (err) {
-        console.error('Error loading users:', err)
-      } finally {
-        setLoading(false)
-      }
-    }
-    loadUsers()
-  }, [sortField, sortOrder, roleFilter, statusFilter, ownerFilter, currentUser])
+  const [currentOrganizationId, setCurrentOrganizationId] = useState<string | null>(null)
+  const [userContextLoaded, setUserContextLoaded] = useState(false)
 
   useEffect(() => {
     const checkSession = async () => {
@@ -187,19 +58,21 @@ export default function UsersPage() {
           router.replace('/login')
           return
         }
-        console.log('Session found in dashboard:', session.user.email)
-        setLoading(false)
-        
-        // Get current user's role
+
+        // Get current user's role and organization
         const { data: userData } = await supabase
           .from('users')
-          .select('role')
+          .select('role, organization_id')
           .eq('id', session.user.id)
           .single()
         
         if (userData) {
-          setCurrentUserRole(userData.role as UserRole)
+          setCurrentUserRole(userData.role)
+          setCurrentOrganizationId(userData.organization_id)
         }
+
+        setUserContextLoaded(true)
+        setLoading(false)
       } catch (error) {
         console.error('Error checking session:', error)
         router.replace('/login')
@@ -208,6 +81,104 @@ export default function UsersPage() {
 
     checkSession()
   }, [router])
+
+  useEffect(() => {
+    // Only fetch data once we have the user context
+    if (!userContextLoaded) return
+
+    const fetchData = async () => {
+      setDataLoading(true)
+      try {
+        await Promise.all([loadUsers(), loadAgents()])
+      } finally {
+        setDataLoading(false)
+      }
+    }
+
+    fetchData()
+  }, [userContextLoaded, sortField, sortOrder, roleFilter, statusFilter, ownerFilter, currentOrganizationId])
+
+  const loadUsers = async () => {
+    try {
+      let query = supabase
+        .from('users')
+        .select(`
+          *,
+          companies (
+            name
+          ),
+          position
+        `)
+        .is('deleted_at', null)
+
+      // Apply organization filter for non-super admins or when an org is selected
+      if (currentUserRole !== 'super_admin' && currentOrganizationId) {
+        console.log('Filtering users by organization (non-super-admin):', currentOrganizationId)
+        query = query.eq('organization_id', currentOrganizationId)
+      } else if (currentUserRole === 'super_admin' && currentOrganizationId) {
+        console.log('Filtering by selected org ID (super-admin):', currentOrganizationId)
+        query = query.eq('organization_id', currentOrganizationId)
+      } else {
+        console.log('No organization filter applied')
+      }
+
+      if (roleFilter) {
+        query = query.eq('role', roleFilter)
+      }
+      if (statusFilter) {
+        query = query.eq('status', statusFilter)
+      }
+      if (ownerFilter !== 'all') {
+        query = query.eq('owner_id', ownerFilter)
+      }
+
+      query = query.order(sortField, { ascending: sortOrder === 'asc' })
+      
+      const { data, error } = await query
+      
+      if (error) {
+        console.error('Error loading users:', error)
+        return
+      }
+      
+      const usersWithCompanyNames = (data || []).map(user => ({
+        ...user,
+        company_name: user.companies?.name
+      }))
+      
+      setUsers(usersWithCompanyNames as User[])
+    } catch (err) {
+      console.error('Error loading users:', err)
+    }
+  }
+
+  const loadAgents = async () => {
+    try {
+      let query = supabase
+        .from('users')
+        .select('*')
+        .not('role', 'in', '("lead","customer")')
+        .is('deleted_at', null)
+        .order('role')
+
+      if (currentUserRole !== 'super_admin') {
+        query = query.eq('organization_id', currentOrganizationId)
+      } else if (currentOrganizationId) {
+        query = query.eq('organization_id', currentOrganizationId)
+      }
+      
+      const { data, error } = await query
+      
+      if (error) {
+        console.error('Error loading agents:', error)
+        return
+      }
+      
+      setAgents((data || []) as User[])
+    } catch (err) {
+      console.error('Error loading agents:', err)
+    }
+  }
 
   const filteredUsers = users.filter(user => {
     const searchLower = searchTerm.toLowerCase()
@@ -243,6 +214,14 @@ export default function UsersPage() {
     setStatusFilter(null)
     setOwnerFilter('all')
     setSearchTerm("")
+  }
+
+  if (loading || dataLoading || !userContextLoaded) {
+    return (
+      <div className="flex items-center justify-center min-h-screen">
+        <p>Loading...</p>
+      </div>
+    )
   }
 
   return (

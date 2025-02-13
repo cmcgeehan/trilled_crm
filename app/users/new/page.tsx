@@ -21,6 +21,7 @@ export default function NewUserPage() {
   const [agents, setAgents] = useState<{ id: string, email: string | null, first_name: string | null, role: UserRole }[]>([])
   const [companies, setCompanies] = useState<Database['public']['Tables']['companies']['Row'][]>([])
   const [currentUserRole, setCurrentUserRole] = useState<string | null>(null)
+  const [currentOrganizationId, setCurrentOrganizationId] = useState<string | null>(null)
   const [formData, setFormData] = useState({
     first_name: "",
     last_name: "",
@@ -43,15 +44,16 @@ export default function NewUserPage() {
           return
         }
 
-        // Get current user's role
+        // Get current user's role and organization
         const { data: userData } = await supabase
           .from('users')
-          .select('role')
+          .select('role, organization_id')
           .eq('id', session.user.id)
           .single()
         
         if (userData) {
           setCurrentUserRole(userData.role)
+          setCurrentOrganizationId(userData.organization_id)
         }
       } catch (error) {
         console.error('Error checking session:', error)
@@ -137,7 +139,7 @@ export default function NewUserPage() {
         // For leads and customers, just create a UUID without auth
         userId = crypto.randomUUID()
         
-        // Create the database record directly
+        // Create new user
         const { error: insertError } = await supabase
           .from('users')
           .insert({
@@ -152,9 +154,44 @@ export default function NewUserPage() {
             status: formData.role === 'lead' ? 'new' : 'won',
             owner_id: formData.owner_id,
             created_at: new Date().toISOString(),
+            organization_id: currentOrganizationId
           })
 
         if (insertError) throw insertError
+
+        // Create follow-ups immediately after user creation for leads and customers
+        if (formData.role === 'lead' || formData.role === 'customer') {
+          // Calculate follow-up dates
+          const followUpDates = calculateFollowUpDates(new Date(), formData.role)
+          
+          // Create all follow-ups in a single batch to minimize delay
+          const followUpsToCreate = followUpDates.map(date => ({
+            date: date.toISOString(),
+            type: 'email',
+            user_id: userId,
+            completed: false,
+            next_follow_up_id: null
+          }))
+
+          // Insert all follow-ups at once
+          const { data: newFollowUps, error: followUpError } = await supabase
+            .from('follow_ups')
+            .insert(followUpsToCreate)
+            .select()
+
+          if (followUpError) throw followUpError
+          if (!newFollowUps) throw new Error('Failed to create follow-ups')
+
+          // Update next_follow_up_id links
+          for (let i = 0; i < newFollowUps.length - 1; i++) {
+            const { error: updateError } = await supabase
+              .from('follow_ups')
+              .update({ next_follow_up_id: newFollowUps[i + 1].id })
+              .eq('id', newFollowUps[i].id)
+
+            if (updateError) throw updateError
+          }
+        }
       }
 
       // If we created an auth user, update the database record
@@ -171,47 +208,11 @@ export default function NewUserPage() {
             status: formData.role === 'lead' ? 'new' : 'won',
             owner_id: formData.owner_id,
             created_at: new Date().toISOString(),
+            organization_id: currentOrganizationId
           })
           .eq('id', userId)
 
         if (updateError) throw updateError
-      }
-
-      // Only create follow-ups for leads and customers
-      if (formData.role === 'lead' || formData.role === 'customer') {
-        // Calculate follow-up dates
-        const followUpDates = calculateFollowUpDates(new Date(), formData.role)
-        
-        // Create the follow-ups
-        let previousFollowUpId: string | null = null
-        for (const date of followUpDates) {
-          const { data: followUp, error: followUpError } = await supabase
-            .from('follow_ups')
-            .insert({
-              date: date.toISOString(),
-              type: 'email',
-              user_id: userId,
-              title: `${formData.role} follow-up`,
-              completed: false,
-              next_follow_up_id: null
-            })
-            .select()
-            .single()
-
-          if (followUpError) throw followUpError
-          if (!followUp) throw new Error('Failed to create follow-up')
-
-          if (previousFollowUpId) {
-            const { error: updateError } = await supabase
-              .from('follow_ups')
-              .update({ next_follow_up_id: followUp.id })
-              .eq('id', previousFollowUpId)
-
-            if (updateError) throw updateError
-          }
-
-          previousFollowUpId = followUp.id
-        }
       }
 
       router.push('/users')

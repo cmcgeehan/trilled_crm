@@ -67,6 +67,7 @@ export default function BulkUpsertPage() {
   const [validationErrors, setValidationErrors] = useState<ValidationError[]>([])
   const [success, setSuccess] = useState(false)
   const [currentUserRole, setCurrentUserRole] = useState<UserRole | null>(null)
+  const [currentOrganizationId, setCurrentOrganizationId] = useState<string | null>(null)
 
   useEffect(() => {
     const checkAccess = async () => {
@@ -78,10 +79,10 @@ export default function BulkUpsertPage() {
           return
         }
 
-        // Get current user's role
+        // Get current user's role and organization
         const { data: userData } = await supabase
           .from('users')
-          .select('role')
+          .select('role, organization_id')
           .eq('id', session.user.id)
           .single()
         
@@ -92,6 +93,7 @@ export default function BulkUpsertPage() {
         }
 
         setCurrentUserRole(userData.role as UserRole)
+        setCurrentOrganizationId(userData.organization_id)
         setLoading(false)
       } catch (error) {
         console.error('Error checking access:', error)
@@ -194,12 +196,18 @@ export default function BulkUpsertPage() {
         if (!companyData.name) continue // Skip if no name
 
         // Check if company exists
-        const { data: existingCompany } = await supabase
+        let query = supabase
           .from('companies')
           .select('id')
           .eq('name', companyData.name)
           .is('deleted_at', null)
-          .single()
+
+        // If admin, restrict to their organization's companies
+        if (currentUserRole === 'admin' && currentOrganizationId) {
+          query = query.eq('organization_id', currentOrganizationId)
+        }
+
+        const { data: existingCompany } = await query.single()
 
         if (existingCompany) {
           // Update existing company
@@ -213,7 +221,10 @@ export default function BulkUpsertPage() {
           // Create new company
           const { error: createError } = await supabase
             .from('companies')
-            .insert([companyData])
+            .insert([{
+              ...companyData,
+              organization_id: currentOrganizationId
+            }])
 
           if (createError) throw createError
         }

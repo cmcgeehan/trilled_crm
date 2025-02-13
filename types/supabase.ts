@@ -6,9 +6,44 @@ export type Json =
   | { [key: string]: Json | undefined }
   | Json[]
 
-export type Database = {
+export interface Database {
   public: {
     Tables: {
+      organizations: {
+        Row: {
+          id: string
+          name: string
+          slug: string
+          plan: string
+          subscription_status: string
+          max_users: number
+          created_at: string
+          updated_at: string
+          deleted_at: string | null
+        }
+        Insert: {
+          id?: string
+          name: string
+          slug: string
+          plan?: string
+          subscription_status?: string
+          max_users?: number
+          created_at?: string
+          updated_at?: string
+          deleted_at?: string | null
+        }
+        Update: {
+          id?: string
+          name?: string
+          slug?: string
+          plan?: string
+          subscription_status?: string
+          max_users?: number
+          created_at?: string
+          updated_at?: string
+          deleted_at?: string | null
+        }
+      }
       integrations: {
         Row: {
           id: string
@@ -104,59 +139,53 @@ export type Database = {
       users: {
         Row: {
           id: string
-          created_at: string
           email: string | null
           phone: string | null
           first_name: string | null
           last_name: string | null
-          company_id: string | null
-          notes: string | null
-          status: "needs_response" | "new" | "follow_up" | "won" | "lost"
-          role: "lead" | "customer" | "agent" | "admin" | "super_admin"
-          updated_at: string | null
-          last_login: string | null
-          deleted_at: string | null
-          owner_id: string | null
-          lost_at: string | null
+          role: 'lead' | 'customer' | 'agent' | 'admin' | 'super_admin'
+          status: string
           lost_reason: string | null
+          lost_at: string | null
+          owner_id: string | null
+          created_at: string
+          updated_at: string
+          deleted_at: string | null
+          organization_id: string | null
           position: string | null
         }
         Insert: {
           id?: string
-          created_at?: string
           email?: string | null
           phone?: string | null
           first_name?: string | null
           last_name?: string | null
-          company_id?: string | null
-          notes?: string | null
-          status?: "needs_response" | "new" | "follow_up" | "won" | "lost"
-          role?: "lead" | "customer" | "agent" | "admin" | "super_admin"
-          updated_at?: string | null
-          last_login?: string | null
-          deleted_at?: string | null
-          owner_id?: string | null
-          lost_at?: string | null
+          role?: 'lead' | 'customer' | 'agent' | 'admin' | 'super_admin'
+          status?: string
           lost_reason?: string | null
+          lost_at?: string | null
+          owner_id?: string | null
+          created_at?: string
+          updated_at?: string
+          deleted_at?: string | null
+          organization_id?: string | null
           position?: string | null
         }
         Update: {
           id?: string
-          created_at?: string
           email?: string | null
           phone?: string | null
           first_name?: string | null
           last_name?: string | null
-          company_id?: string | null
-          notes?: string | null
-          status?: "needs_response" | "new" | "follow_up" | "won" | "lost"
-          role?: "lead" | "customer" | "agent" | "admin" | "super_admin"
-          updated_at?: string | null
-          last_login?: string | null
-          deleted_at?: string | null
-          owner_id?: string | null
-          lost_at?: string | null
+          role?: 'lead' | 'customer' | 'agent' | 'admin' | 'super_admin'
+          status?: string
           lost_reason?: string | null
+          lost_at?: string | null
+          owner_id?: string | null
+          created_at?: string
+          updated_at?: string
+          deleted_at?: string | null
+          organization_id?: string | null
           position?: string | null
         }
         Relationships: [

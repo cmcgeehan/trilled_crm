@@ -1,33 +1,17 @@
-import { createClient } from '@supabase/supabase-js'
+import { createRouteHandlerClient } from '@supabase/auth-helpers-nextjs'
+import { cookies } from 'next/headers'
 import { NextResponse } from 'next/server'
 import { Database } from '@/types/supabase'
 
-// Validate environment variables
-if (!process.env.NEXT_PUBLIC_SUPABASE_URL) {
-  throw new Error('Missing environment variable: NEXT_PUBLIC_SUPABASE_URL')
-}
-if (!process.env.SUPABASE_SERVICE_ROLE_KEY) {
-  throw new Error('Missing environment variable: SUPABASE_SERVICE_ROLE_KEY')
-}
-
-// Create a Supabase client with the service role key
-const supabaseAdmin = createClient<Database>(
-  process.env.NEXT_PUBLIC_SUPABASE_URL,
-  process.env.SUPABASE_SERVICE_ROLE_KEY,
-  {
-    auth: {
-      autoRefreshToken: false,
-      persistSession: false
-    }
-  }
-)
-
 export async function POST(request: Request) {
   try {
+    // Create a Supabase client for the route handler
+    const supabase = createRouteHandlerClient<Database>({ cookies })
+    
     const userData = await request.json()
     
-    // Insert the new customer using service role client
-    const { data: newCustomer, error: customerError } = await supabaseAdmin
+    // Insert the new customer
+    const { data: newCustomer, error: customerError } = await supabase
       .from('users')
       .insert([userData])
       .select()

@@ -61,19 +61,32 @@ export default function CompaniesPage() {
   const [searchTerm, setSearchTerm] = useState("")
   const [companies, setCompanies] = useState<Company[]>([])
   const [loading, setLoading] = useState(true)
+  const [dataLoading, setDataLoading] = useState(true)
   const [sortField, setSortField] = useState<SortField>('created_at')
   const [sortOrder, setSortOrder] = useState<SortOrder>('desc')
   const [typeFilter, setTypeFilter] = useState<CompanyType | null>(null)
   const [currentUserRole, setCurrentUserRole] = useState<string | null>(null)
+  const [currentOrganizationId, setCurrentOrganizationId] = useState<string | null>(null)
 
   useEffect(() => {
     const loadCompanies = async () => {
       try {
-        setLoading(true)
+        setDataLoading(true)
         let query = supabase
           .from('companies')
           .select('*')
           .is('deleted_at', null)
+
+        // Apply organization filter for non-super admins or when an org is selected
+        if (currentUserRole !== 'super_admin' && currentOrganizationId) {
+          console.log('Filtering companies by organization (non-super-admin):', currentOrganizationId)
+          query = query.eq('organization_id', currentOrganizationId)
+        } else if (currentUserRole === 'super_admin' && currentOrganizationId) {
+          console.log('Filtering by selected org ID (super-admin):', currentOrganizationId)
+          query = query.eq('organization_id', currentOrganizationId)
+        } else {
+          console.log('No organization filter applied')
+        }
 
         if (typeFilter) {
           query = query.eq('type', typeFilter)
@@ -92,11 +105,11 @@ export default function CompaniesPage() {
       } catch (err) {
         console.error('Error loading companies:', err)
       } finally {
-        setLoading(false)
+        setDataLoading(false)
       }
     }
     loadCompanies()
-  }, [sortField, sortOrder, typeFilter])
+  }, [sortField, sortOrder, typeFilter, currentOrganizationId, currentUserRole])
 
   useEffect(() => {
     const checkSession = async () => {
@@ -108,18 +121,20 @@ export default function CompaniesPage() {
           return
         }
         console.log('Session found in dashboard:', session.user.email)
-        setLoading(false)
         
-        // Get current user's role
+        // Get current user's role and organization
         const { data: userData } = await supabase
           .from('users')
-          .select('role')
+          .select('role, organization_id')
           .eq('id', session.user.id)
           .single()
         
         if (userData) {
           setCurrentUserRole(userData.role)
+          setCurrentOrganizationId(userData.organization_id)
         }
+        
+        setLoading(false)
       } catch (error) {
         console.error('Error checking session:', error)
         router.replace('/login')
@@ -156,6 +171,14 @@ export default function CompaniesPage() {
   const handleClearFilters = () => {
     setTypeFilter(null)
     setSearchTerm("")
+  }
+
+  if (loading || dataLoading) {
+    return (
+      <div className="flex items-center justify-center min-h-screen">
+        <p>Loading...</p>
+      </div>
+    )
   }
 
   return (

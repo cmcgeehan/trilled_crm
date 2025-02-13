@@ -37,6 +37,7 @@ export default function BulkUpsertPage() {
   const [validationErrors, setValidationErrors] = useState<ValidationError[]>([])
   const [success, setSuccess] = useState(false)
   const [currentUserRole, setCurrentUserRole] = useState<UserRole | null>(null)
+  const [currentOrganizationId, setCurrentOrganizationId] = useState<string | null>(null)
 
   useEffect(() => {
     const checkAccess = async () => {
@@ -48,10 +49,10 @@ export default function BulkUpsertPage() {
           return
         }
 
-        // Get current user's role
+        // Get current user's role and organization
         const { data: userData } = await supabase
           .from('users')
-          .select('role')
+          .select('role, organization_id')
           .eq('id', session.user.id)
           .single()
         
@@ -62,6 +63,7 @@ export default function BulkUpsertPage() {
         }
 
         setCurrentUserRole(userData.role as UserRole)
+        setCurrentOrganizationId(userData.organization_id)
         setLoading(false)
       } catch (error) {
         console.error('Error checking access:', error)
@@ -95,14 +97,25 @@ export default function BulkUpsertPage() {
       errors.push(`Invalid role: ${data.role}. Must be one of: ${VALID_ROLES.join(', ')}`)
     }
 
+    // Super admins can create users in any org, admins only in their org
+    if (currentUserRole === 'admin' && data.role === 'super_admin') {
+      errors.push('Admins cannot create super admin users')
+    }
+
     // Validate company name if provided
     if (data.company_name) {
-      const { data: company, error: companyError } = await supabase
+      let query = supabase
         .from('companies')
         .select('id')
         .eq('name', data.company_name)
         .is('deleted_at', null)
-        .single()
+
+      // If admin, restrict to their organization's companies
+      if (currentUserRole === 'admin' && currentOrganizationId) {
+        query = query.eq('organization_id', currentOrganizationId)
+      }
+
+      const { data: company, error: companyError } = await query.single()
 
       if (companyError || !company) {
         errors.push(`Company not found: ${data.company_name}`)
@@ -111,12 +124,18 @@ export default function BulkUpsertPage() {
 
     // Validate owner email if provided
     if (data.owner_email) {
-      const { data: owner, error: ownerError } = await supabase
+      let query = supabase
         .from('users')
         .select('id, role')
         .eq('email', data.owner_email)
         .in('role', ['agent', 'admin', 'super_admin'])
-        .single()
+
+      // If admin, restrict to their organization's users
+      if (currentUserRole === 'admin' && currentOrganizationId) {
+        query = query.eq('organization_id', currentOrganizationId)
+      }
+
+      const { data: owner, error: ownerError } = await query.single()
 
       if (ownerError || !owner) {
         errors.push(`Owner not found or not an agent/admin: ${data.owner_email}`)
@@ -221,12 +240,18 @@ export default function BulkUpsertPage() {
       for (const userData of usersToProcess) {
         // Look up company ID if company_name is provided
         if (userData.company_name) {
-          const { data: companyData } = await supabase
+          let query = supabase
             .from('companies')
             .select('id')
             .eq('name', userData.company_name)
             .is('deleted_at', null)
-            .single()
+
+          // If admin, restrict to their organization's companies
+          if (currentUserRole === 'admin' && currentOrganizationId) {
+            query = query.eq('organization_id', currentOrganizationId)
+          }
+          
+          const { data: companyData } = await query.single()
           
           if (companyData) {
             userData.company_id = companyData.id
@@ -236,12 +261,18 @@ export default function BulkUpsertPage() {
 
         // Look up owner ID if owner_email is provided
         if (userData.owner_email) {
-          const { data: ownerData } = await supabase
+          let query = supabase
             .from('users')
             .select('id')
             .eq('email', userData.owner_email)
             .in('role', ['agent', 'admin', 'super_admin'])
-            .single()
+
+          // If admin, restrict to their organization's users
+          if (currentUserRole === 'admin' && currentOrganizationId) {
+            query = query.eq('organization_id', currentOrganizationId)
+          }
+          
+          const { data: ownerData } = await query.single()
           
           if (ownerData) {
             userData.owner_id = ownerData.id
@@ -249,9 +280,10 @@ export default function BulkUpsertPage() {
           delete userData.owner_email
         }
 
-        // Set defaults
+        // Set defaults and organization
         userData.role = userData.role || 'lead'
         userData.status = userData.status || 'new'
+        userData.organization_id = currentOrganizationId
 
         // Check if user exists
         if (userData.email) {
@@ -291,7 +323,6 @@ export default function BulkUpsertPage() {
                     date: date.toISOString(),
                     type: 'email',
                     user_id: newUser.id,
-                    title: `${userData.role} follow-up`,
                     completed: false,
                     next_follow_up_id: null
                   })

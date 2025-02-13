@@ -79,7 +79,6 @@ export default function NewCustomerPage() {
           .from('follow_ups')
           .insert({
             user_id: newCustomer.id,
-            title: `${formData.role === 'lead' ? 'Lead' : 'Customer'} Follow-up`,
             date: date.toISOString(),
             type: 'email',
             completed: false

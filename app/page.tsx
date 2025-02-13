@@ -36,12 +36,16 @@ const STATUS_STYLES: Record<UserStatus, { bg: string, text: string }> = {
 export default function DashboardPage() {
   const router = useRouter()
   const [loading, setLoading] = useState(true)
+  const [dataLoading, setDataLoading] = useState(true)
   const [leads, setLeads] = useState<User[]>([])
   const [stats, setStats] = useState({
     openLeads: 0,
     wonLeads: 0,
     conversionRate: 0,
   })
+  const [currentUserRole, setCurrentUserRole] = useState<string | null>(null)
+  const [currentOrganizationId, setCurrentOrganizationId] = useState<string | null>(null)
+  const [userContextLoaded, setUserContextLoaded] = useState(false)
 
   useEffect(() => {
     const checkSession = async () => {
@@ -53,38 +57,21 @@ export default function DashboardPage() {
           return
         }
         console.log('Session found in dashboard:', session.user.email)
-        setLoading(false)
-        
-        // Fetch initial data
-        fetchLeads()
-        fetchStats()
 
-        // Set up real-time subscriptions
-        const channel = supabase.channel('users-changes')
+        // Get current user's role and organization
+        const { data: userData } = await supabase
+          .from('users')
+          .select('role, organization_id')
+          .eq('id', session.user.id)
+          .single()
         
-        channel
-          .on('postgres_changes', 
-            { event: '*', schema: 'public', table: 'users' },
-            () => {
-              fetchLeads()
-              fetchStats()
-            }
-          )
-          .subscribe(async (status, err) => {
-            if (status === 'SUBSCRIBED') {
-              console.log('Successfully subscribed to changes')
-            }
-            if (status === 'CHANNEL_ERROR') {
-              console.error('Channel error:', err)
-              console.log('Attempting to reconnect...')
-              await channel.unsubscribe()
-              channel.subscribe()
-            }
-          })
-
-        return () => {
-          channel.unsubscribe()
+        if (userData) {
+          setCurrentUserRole(userData.role)
+          setCurrentOrganizationId(userData.organization_id)
         }
+
+        setUserContextLoaded(true)
+        setLoading(false)
       } catch (error) {
         console.error('Error checking session:', error)
         router.replace('/login')
@@ -94,78 +81,152 @@ export default function DashboardPage() {
     checkSession()
   }, [router])
 
+  useEffect(() => {
+    // Only fetch data once we have the user context
+    if (!userContextLoaded) return
+
+    const fetchData = async () => {
+      setDataLoading(true)
+      try {
+        await Promise.all([fetchLeads(), fetchStats()])
+      } finally {
+        setDataLoading(false)
+      }
+    }
+
+    fetchData()
+
+    // Set up real-time subscriptions
+    const channel = supabase.channel('users-changes')
+    
+    channel
+      .on('postgres_changes', 
+        { event: '*', schema: 'public', table: 'users' },
+        () => {
+          fetchLeads()
+          fetchStats()
+        }
+      )
+      .subscribe(async (status, err) => {
+        if (status === 'SUBSCRIBED') {
+          console.log('Successfully subscribed to changes')
+        }
+        if (status === 'CHANNEL_ERROR') {
+          console.error('Channel error:', err)
+          console.log('Attempting to reconnect...')
+          await channel.unsubscribe()
+          channel.subscribe()
+        }
+      })
+
+    return () => {
+      channel.unsubscribe()
+    }
+  }, [userContextLoaded])
+
   const fetchStats = async () => {
-    // Get open leads count (not won or lost)
-    const { count: openLeadsCount } = await supabase
-      .from('users')
-      .select('*', { count: 'exact', head: true })
-      .eq('role', 'lead')
-      .not('status', 'in', '(won,lost)')
-      .is('deleted_at', null)
+    setDataLoading(true)
+    try {
+      let query = supabase
+        .from('users')
+        .select('*', { count: 'exact', head: true })
+        .eq('role', 'lead')
+        .is('deleted_at', null)
 
-    // Get won leads count
-    const { count: wonLeadsCount } = await supabase
-      .from('users')
-      .select('*', { count: 'exact', head: true })
-      .eq('role', 'lead')
-      .eq('status', 'won')
-      .is('deleted_at', null)
+      // Apply organization filter for non-super admins or when an org is selected
+      if (currentUserRole !== 'super_admin' && currentOrganizationId) {
+        console.log('Filtering stats by organization (non-super-admin):', currentOrganizationId)
+        query = query.eq('organization_id', currentOrganizationId)
+      } else if (currentUserRole === 'super_admin' && currentOrganizationId) {
+        console.log('Filtering stats by selected org ID (super-admin):', currentOrganizationId)
+        query = query.eq('organization_id', currentOrganizationId)
+      } else {
+        console.log('No organization filter applied for stats')
+      }
 
-    // Get total closed leads (won + lost) for conversion rate
-    const { count: totalClosedLeads } = await supabase
-      .from('users')
-      .select('*', { count: 'exact', head: true })
-      .eq('role', 'lead')
-      .in('status', ['won', 'lost'])
-      .is('deleted_at', null)
+      // Get open leads count (not won or lost)
+      const { count: openLeadsCount } = await query
+        .not('status', 'in', '(won,lost)')
 
-    const conversionRate = totalClosedLeads && wonLeadsCount ? (wonLeadsCount / totalClosedLeads) * 100 : 0
+      // Get won leads count
+      const { count: wonLeadsCount } = await query
+        .eq('status', 'won')
 
-    setStats({
-      openLeads: openLeadsCount || 0,
-      wonLeads: wonLeadsCount || 0,
-      conversionRate,
-    })
+      // Get total closed leads (won + lost) for conversion rate
+      const { count: totalClosedLeads } = await query
+        .in('status', ['won', 'lost'])
+
+      const conversionRate = totalClosedLeads && wonLeadsCount ? (wonLeadsCount / totalClosedLeads) * 100 : 0
+
+      setStats({
+        openLeads: openLeadsCount || 0,
+        wonLeads: wonLeadsCount || 0,
+        conversionRate,
+      })
+    } finally {
+      setDataLoading(false)
+    }
   }
 
   const fetchLeads = async () => {
-    const { data, error } = await supabase
-      .from('users')
-      .select(`
-        *,
-        companies (
-          name
-        ),
-        position
-      `)
-      .eq('role', 'lead')
-      .in('status', ACTIVE_STATUSES)
-      .is('deleted_at', null)
-      .order('created_at', { ascending: false })
-      .limit(10)
+    setDataLoading(true)
+    try {
+      let query = supabase
+        .from('users')
+        .select(`
+          *,
+          companies (
+            name
+          ),
+          position
+        `)
+        .eq('role', 'lead')
+        .in('status', ACTIVE_STATUSES)
+        .is('deleted_at', null)
+        .order('created_at', { ascending: false })
+        .limit(10)
 
-    if (error) {
-      console.error('Error fetching leads:', error)
-      return
+      // Apply organization filter for non-super admins or when an org is selected
+      if (currentUserRole !== 'super_admin' && currentOrganizationId) {
+        console.log('Filtering leads by organization (non-super-admin):', currentOrganizationId)
+        query = query.eq('organization_id', currentOrganizationId)
+      } else if (currentUserRole === 'super_admin' && currentOrganizationId) {
+        console.log('Filtering leads by selected org ID (super-admin):', currentOrganizationId)
+        query = query.eq('organization_id', currentOrganizationId)
+      } else {
+        console.log('No organization filter applied for leads')
+      }
+
+      const { data, error } = await query
+
+      if (error) {
+        console.error('Error fetching leads:', error)
+        return
+      }
+
+      console.log('Raw leads data:', data)
+      console.log('Companies data from leads:', data?.map(d => d.companies))
+
+      // Sort leads by status priority and ensure correct typing
+      const sortedLeads = [...(data || [])].map(lead => ({
+        ...lead,
+        status: lead.status as UserStatus,
+        company_name: lead.companies?.name
+      })).sort((a, b) => {
+        // Ensure we're working with valid UserStatus values
+        const statusA = a.status as UserStatus
+        const statusB = b.status as UserStatus
+        return STATUS_PRIORITY[statusA] - STATUS_PRIORITY[statusB]
+      })
+
+      console.log('Processed leads with companies:', sortedLeads)
+      setLeads(sortedLeads)
+    } finally {
+      setDataLoading(false)
     }
-
-    console.log('Raw leads data:', data)
-    console.log('Companies data from leads:', data?.map(d => d.companies))
-
-    // Sort leads by status priority and ensure correct typing
-    const sortedLeads = [...(data || [])].map(lead => ({
-      ...lead,
-      status: lead.status as UserStatus,
-      company_name: lead.companies?.name
-    })).sort((a, b) => {
-      return STATUS_PRIORITY[a.status] - STATUS_PRIORITY[b.status]
-    })
-
-    console.log('Processed leads with companies:', sortedLeads)
-    setLeads(sortedLeads)
   }
 
-  if (loading) {
+  if (loading || dataLoading || !userContextLoaded) {
     return (
       <div className="flex items-center justify-center min-h-screen">
         <p>Loading...</p>

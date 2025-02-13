@@ -25,7 +25,8 @@ export default function NewCompanyPage() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [currentUserRole, setCurrentUserRole] = useState<string | null>(null)
-  const [newCompany, setNewCompany] = useState<NewCompany>({
+  const [currentOrganizationId, setCurrentOrganizationId] = useState<string | null>(null)
+  const [newCompany, setNewCompany] = useState<Partial<NewCompany>>({
     name: '',
     type: '',
     street_address: '',
@@ -46,15 +47,16 @@ export default function NewCompanyPage() {
           return
         }
 
-        // Get current user's role
+        // Get current user's role and organization
         const { data: userData } = await supabase
           .from('users')
-          .select('role')
+          .select('role, organization_id')
           .eq('id', session.user.id)
           .single()
         
         if (userData) {
           setCurrentUserRole(userData.role)
+          setCurrentOrganizationId(userData.organization_id)
         }
       } catch (error) {
         console.error('Error checking session:', error)
@@ -91,6 +93,7 @@ export default function NewCompanyPage() {
           state: newCompany.state || null,
           postal_code: newCompany.postal_code || null,
           country: newCompany.country || null,
+          organization_id: currentOrganizationId
         })
         .select()
         .single()
@@ -142,7 +145,7 @@ export default function NewCompanyPage() {
                   <Label htmlFor="name">Company Name *</Label>
                   <Input
                     id="name"
-                    value={newCompany.name}
+                    value={newCompany.name || ''}
                     onChange={(e) => setNewCompany(prev => ({ ...prev, name: e.target.value }))}
                     className="mt-1"
                     required
@@ -151,7 +154,7 @@ export default function NewCompanyPage() {
                 <div>
                   <Label htmlFor="type">Type *</Label>
                   <Select
-                    value={newCompany.type}
+                    value={newCompany.type || ''}
                     onValueChange={(value: string) => setNewCompany(prev => ({ ...prev, type: value }))}
                   >
                     <SelectTrigger id="type" className="mt-1">
