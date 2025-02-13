@@ -16,6 +16,11 @@ export async function GET(request: Request) {
     if (type === 'signup') {
       return NextResponse.redirect(new URL('/set-password', requestUrl.origin))
     }
+    
+    // If this is an invite verification, redirect to verify page
+    if (type === 'invite') {
+      return NextResponse.redirect(new URL('/auth/verify', requestUrl.origin))
+    }
   }
 
   // For all other cases, use the provided redirectTo or default to home

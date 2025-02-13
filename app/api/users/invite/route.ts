@@ -30,7 +30,8 @@ export async function POST(request: Request) {
 
     // Create and invite the user in one step
     const { data, error } = await adminClient.auth.admin.inviteUserByEmail(email, {
-      data: userData
+      data: userData,
+      redirectTo: `${process.env.NEXT_PUBLIC_SITE_URL}/auth/verify`
     })
 
     if (error) {
