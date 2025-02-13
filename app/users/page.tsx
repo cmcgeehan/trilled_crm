@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useCallback } from "react"
 import Link from "next/link"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
@@ -13,6 +13,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { cn } from "@/lib/utils"
 import { useRouter } from "next/navigation"
 import { Database } from "@/types/supabase"
+import { toast } from "react-hot-toast"
 
 type User = Omit<Database['public']['Tables']['users']['Row'], 'status'> & {
   status: UserStatus,
@@ -43,11 +44,62 @@ export default function UsersPage() {
   const [roleFilter, setRoleFilter] = useState<UserRole | null>(null)
   const [statusFilter, setStatusFilter] = useState<UserStatus | null>(null)
   const [ownerFilter, setOwnerFilter] = useState<string>('all')
-  const [currentUser, setCurrentUser] = useState<User | null>(null)
   const [agents, setAgents] = useState<User[]>([])
   const [currentUserRole, setCurrentUserRole] = useState<UserRole | null>(null)
   const [currentOrganizationId, setCurrentOrganizationId] = useState<string | null>(null)
   const [userContextLoaded, setUserContextLoaded] = useState(false)
+
+  const loadUsers = useCallback(async () => {
+    setDataLoading(true)
+    try {
+      let query = supabase
+        .from('users')
+        .select('*')
+        .order(sortField, { ascending: sortOrder === 'asc' })
+
+      if (currentOrganizationId) {
+        query = query.eq('organization_id', currentOrganizationId)
+      }
+
+      if (roleFilter) {
+        query = query.eq('role', roleFilter)
+      }
+
+      if (statusFilter) {
+        query = query.eq('status', statusFilter)
+      }
+
+      if (ownerFilter !== 'all') {
+        query = query.eq('owner_id', ownerFilter)
+      }
+
+      const { data: users, error } = await query
+
+      if (error) throw error
+      setUsers(users || [])
+    } catch (error) {
+      console.error('Error loading users:', error)
+      toast.error('Failed to load users')
+    } finally {
+      setDataLoading(false)
+    }
+  }, [sortField, sortOrder, currentOrganizationId, roleFilter, statusFilter, ownerFilter])
+
+  const loadAgents = useCallback(async () => {
+    try {
+      const { data: agentUsers, error } = await supabase
+        .from('users')
+        .select('*')
+        .in('role', ['agent', 'admin'])
+        .eq('organization_id', currentOrganizationId)
+
+      if (error) throw error
+      setAgents(agentUsers || [])
+    } catch (error) {
+      console.error('Error loading agents:', error)
+      toast.error('Failed to load agents')
+    }
+  }, [currentOrganizationId])
 
   useEffect(() => {
     const checkSession = async () => {
@@ -83,102 +135,11 @@ export default function UsersPage() {
   }, [router])
 
   useEffect(() => {
-    // Only fetch data once we have the user context
-    if (!userContextLoaded) return
-
-    const fetchData = async () => {
-      setDataLoading(true)
-      try {
-        await Promise.all([loadUsers(), loadAgents()])
-      } finally {
-        setDataLoading(false)
-      }
+    if (userContextLoaded) {
+      loadAgents()
+      loadUsers()
     }
-
-    fetchData()
-  }, [userContextLoaded, sortField, sortOrder, roleFilter, statusFilter, ownerFilter, currentOrganizationId])
-
-  const loadUsers = async () => {
-    try {
-      let query = supabase
-        .from('users')
-        .select(`
-          *,
-          companies (
-            name
-          ),
-          position
-        `)
-        .is('deleted_at', null)
-
-      // Apply organization filter for non-super admins or when an org is selected
-      if (currentUserRole !== 'super_admin' && currentOrganizationId) {
-        console.log('Filtering users by organization (non-super-admin):', currentOrganizationId)
-        query = query.eq('organization_id', currentOrganizationId)
-      } else if (currentUserRole === 'super_admin' && currentOrganizationId) {
-        console.log('Filtering by selected org ID (super-admin):', currentOrganizationId)
-        query = query.eq('organization_id', currentOrganizationId)
-      } else {
-        console.log('No organization filter applied')
-      }
-
-      if (roleFilter) {
-        query = query.eq('role', roleFilter)
-      }
-      if (statusFilter) {
-        query = query.eq('status', statusFilter)
-      }
-      if (ownerFilter !== 'all') {
-        query = query.eq('owner_id', ownerFilter)
-      }
-
-      query = query.order(sortField, { ascending: sortOrder === 'asc' })
-      
-      const { data, error } = await query
-      
-      if (error) {
-        console.error('Error loading users:', error)
-        return
-      }
-      
-      const usersWithCompanyNames = (data || []).map(user => ({
-        ...user,
-        company_name: user.companies?.name
-      }))
-      
-      setUsers(usersWithCompanyNames as User[])
-    } catch (err) {
-      console.error('Error loading users:', err)
-    }
-  }
-
-  const loadAgents = async () => {
-    try {
-      let query = supabase
-        .from('users')
-        .select('*')
-        .not('role', 'in', '("lead","customer")')
-        .is('deleted_at', null)
-        .order('role')
-
-      if (currentUserRole !== 'super_admin') {
-        query = query.eq('organization_id', currentOrganizationId)
-      } else if (currentOrganizationId) {
-        query = query.eq('organization_id', currentOrganizationId)
-      }
-      
-      const { data, error } = await query
-      
-      if (error) {
-        console.error('Error loading agents:', error)
-        return
-      }
-      
-      setAgents((data || []) as User[])
-    } catch (err) {
-      console.error('Error loading agents:', err)
-    }
-  }
+  }, [userContextLoaded, loadAgents, loadUsers])
 
   const filteredUsers = users.filter(user => {
     const searchLower = searchTerm.toLowerCase()

@@ -10,6 +10,8 @@ BEGIN
   INSERT INTO public.users (
     id,           -- This is now a UUID field
     email,
+    first_name,   -- Add first_name
+    last_name,    -- Add last_name
     role,
     status,
     created_at,
@@ -17,7 +19,9 @@ BEGIN
   ) VALUES (
     NEW.id,       -- Use the UUID from auth.users
     NEW.email,
-    'lead',
+    (NEW.raw_user_meta_data->>'first_name')::text,  -- Extract first_name from metadata
+    (NEW.raw_user_meta_data->>'last_name')::text,   -- Extract last_name from metadata
+    'lead',       -- Default role
     'active',
     NOW(),
     NOW()

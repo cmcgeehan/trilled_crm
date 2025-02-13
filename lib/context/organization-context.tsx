@@ -3,6 +3,7 @@
 import { createContext, useContext, useEffect, useState, ReactNode } from "react"
 import { useRouter } from "next/navigation"
 import { supabase } from "@/lib/supabase"
+import { RealtimePostgresChangesPayload } from '@supabase/supabase-js'
 
 type OrganizationContextType = {
   currentUserRole: string | null
@@ -65,12 +66,16 @@ export function OrganizationProvider({ children }: { children: ReactNode }) {
               table: 'users',
               filter: `id=eq.${session.user.id}`
             },
-            async (payload: any) => {
+            async (payload: RealtimePostgresChangesPayload<{
+              id: string;
+              organization_id: string | null;
+              role: string | null;
+            }>) => {
               console.log('User update detected:', payload)
               
               // Check if organization_id has changed
-              const oldOrgId = payload.old?.organization_id
-              const newOrgId = payload.new?.organization_id
+              const oldOrgId = (payload.old as { organization_id?: string | null })?.organization_id
+              const newOrgId = (payload.new as { organization_id?: string | null })?.organization_id
               
               if (newOrgId && oldOrgId !== newOrgId) {
                 console.log('Organization changed:', { oldOrgId, newOrgId })

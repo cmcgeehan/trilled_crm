@@ -2,19 +2,22 @@
 
 import { useState } from 'react';
 import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Label } from '@/components/ui/label';
 import { toast } from 'sonner';
+import { Suspense } from 'react';
 
-export default function OrganizationSignup() {
+function OrganizationSignupForm() {
   const [loading, setLoading] = useState(false);
-  const [orgName, setOrgName] = useState('');
+  const [firstName, setFirstName] = useState('');
+  const [lastName, setLastName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const router = useRouter();
+  const searchParams = useSearchParams();
   const supabase = createClientComponentClient();
 
   const handleSignUp = async (e: React.FormEvent) => {
@@ -22,49 +25,54 @@ export default function OrganizationSignup() {
     setLoading(true);
 
     try {
-      // Create organization
-      const { data: orgData, error: orgError } = await supabase
-        .from('organizations')
-        .insert([
-          {
-            name: orgName,
-            slug: orgName.toLowerCase().replace(/[^a-z0-9]/g, '-'),
-          },
-        ])
-        .select()
-        .single();
-
-      if (orgError) throw orgError;
+      const organizationId = searchParams.get('organization_id');
+      if (!organizationId) {
+        throw new Error('Organization ID is required');
+      }
 
       // Sign up user
       const { data: authData, error: authError } = await supabase.auth.signUp({
         email,
         password,
         options: {
+          data: {
+            first_name: firstName,
+            last_name: lastName,
+            role: 'admin',
+          },
           emailRedirectTo: `${window.location.origin}/auth/callback`,
         },
       });
 
       if (authError) throw authError;
+      if (!authData.user) throw new Error('No user data returned');
 
-      // Create user record and link to organization
+      // Insert the user record directly with UUID
       const { error: userError } = await supabase
         .from('users')
-        .insert([
-          {
-            id: authData.user!.id,
-            email,
-            role: 'admin',
-            organization_id: orgData.id,
-          },
-        ]);
+        .insert({
+          id: authData.user.id,
+          email,
+          first_name: firstName,
+          last_name: lastName,
+          role: 'admin',
+          status: 'active',
+          organization_id: organizationId,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        });
 
-      if (userError) throw userError;
+      if (userError) {
+        console.error('Error creating user:', userError);
+        throw new Error('Error creating user: ' + userError.message);
+      }
 
-      toast.success('Organization created successfully! Please check your email to verify your account.');
+      toast.success('Account created successfully! Please check your email to verify your account.');
       router.push('/login');
-    } catch (error: any) {
-      toast.error(error.message);
+    } catch (error: unknown) {
+      console.error('Error creating user:', error);
+      const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred';
+      toast.error('Error creating user: ' + errorMessage);
     } finally {
       setLoading(false);
     }
@@ -74,22 +82,34 @@ export default function OrganizationSignup() {
     <div className="container flex items-center justify-center min-h-screen py-12">
       <Card className="w-full max-w-md">
         <CardHeader>
-          <CardTitle>Create Organization</CardTitle>
+          <CardTitle>Create Account</CardTitle>
           <CardDescription>
-            Set up your organization to start managing your CRM
+            Sign up to access the CRM
           </CardDescription>
         </CardHeader>
         <CardContent>
           <form onSubmit={handleSignUp} className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="orgName">Organization Name</Label>
-              <Input
-                id="orgName"
-                placeholder="Acme Inc."
-                value={orgName}
-                onChange={(e) => setOrgName(e.target.value)}
-                required
-              />
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="firstName">First Name</Label>
+                <Input
+                  id="firstName"
+                  placeholder="John"
+                  value={firstName}
+                  onChange={(e) => setFirstName(e.target.value)}
+                  required
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="lastName">Last Name</Label>
+                <Input
+                  id="lastName"
+                  placeholder="Doe"
+                  value={lastName}
+                  onChange={(e) => setLastName(e.target.value)}
+                  required
+                />
+              </div>
             </div>
             <div className="space-y-2">
               <Label htmlFor="email">Email</Label>
@@ -117,11 +137,23 @@ export default function OrganizationSignup() {
               className="w-full"
               disabled={loading}
             >
-              {loading ? 'Creating...' : 'Create Organization'}
+              {loading ? 'Creating...' : 'Create Account'}
             </Button>
           </form>
         </CardContent>
       </Card>
     </div>
+  );
+}
+
+export default function OrganizationSignup() {
+  return (
+    <Suspense fallback={
+      <div className="container flex items-center justify-center min-h-screen py-12">
+        <p>Loading...</p>
+      </div>
+    }>
+      <OrganizationSignupForm />
+    </Suspense>
   );
 } 

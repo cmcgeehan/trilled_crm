@@ -153,6 +153,8 @@ export interface Database {
           deleted_at: string | null
           organization_id: string | null
           position: string | null
+          notes: string | null
+          company_id: string | null
         }
         Insert: {
           id?: string
@@ -170,6 +172,8 @@ export interface Database {
           deleted_at?: string | null
           organization_id?: string | null
           position?: string | null
+          notes?: string | null
+          company_id?: string | null
         }
         Update: {
           id?: string
@@ -187,6 +191,8 @@ export interface Database {
           deleted_at?: string | null
           organization_id?: string | null
           position?: string | null
+          notes?: string | null
+          company_id?: string | null
         }
         Relationships: [
           {
