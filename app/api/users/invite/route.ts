@@ -28,14 +28,19 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Email is required' }, { status: 400 })
     }
 
-    // Create and invite the user in one step
-    const { data, error } = await adminClient.auth.admin.inviteUserByEmail(email, {
-      data: userData,
-      redirectTo: 'https://trilled-crm-git-main-cmcgeehans-projects.vercel.app'
+    // Generate initial password as concatenation of user data
+    const initialPassword = `${userData.first_name.toLowerCase()}${userData.last_name.toLowerCase()}${email.toLowerCase()}${(userData.role || 'agent').toLowerCase()}`
+
+    // Create the user with the initial password
+    const { data, error } = await adminClient.auth.admin.createUser({
+      email,
+      password: initialPassword,
+      email_confirm: true,
+      user_metadata: userData,
     })
 
     if (error) {
-      console.error('User invitation error:', error)
+      console.error('User creation error:', error)
       return NextResponse.json({ error: error.message }, { status: 400 })
     }
 
@@ -45,9 +50,9 @@ export async function POST(request: Request) {
 
     return NextResponse.json({ user: data.user })
   } catch (error) {
-    console.error('Error inviting user:', error)
+    console.error('Error creating user:', error)
     return NextResponse.json(
-      { error: 'Failed to invite user' },
+      { error: 'Failed to create user' },
       { status: 500 }
     )
   }

@@ -52,7 +52,7 @@ export default function AuthHandler() {
       }
 
       // If we have a session, redirect to dashboard
-      router.replace('/dashboard')
+      router.replace('/')
     }
 
     handleInitialLoad()

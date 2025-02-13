@@ -112,28 +112,21 @@ export function NavBar() {
       const { data: { user } } = await supabase.auth.getUser()
       if (!user) return
 
-      console.log('Switching organization to:', orgId)
-
-      // Update user's organization_id
+      // Update only the organization_id field
       const { error } = await supabase
         .from('users')
-        .update({ 
-          organization_id: orgId,
-          updated_at: new Date().toISOString() // Force an update
+        .update({
+          organization_id: orgId
         })
         .eq('id', user.id)
 
       if (error) {
         console.error('Error updating organization:', error)
-        throw error
+        return
       }
 
-      console.log('Successfully updated organization in database')
       setCurrentOrgId(orgId)
-      
-      // Force a hard reload after the database update
-      console.log('Reloading page after organization change')
-      window.location.reload()
+      router.refresh()
     } catch (error) {
       console.error('Error switching organization:', error)
     }

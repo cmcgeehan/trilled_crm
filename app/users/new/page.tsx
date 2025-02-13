@@ -126,6 +126,7 @@ export default function NewUserPage() {
             userData: {
               first_name: formData.first_name,
               last_name: formData.last_name,
+              role: formData.role,
               can_login: true
             }
           })

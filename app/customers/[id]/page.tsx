@@ -36,6 +36,7 @@ type Customer = Database['public']['Tables']['users']['Row'] & {
   company?: string;
   lost_reason?: string | null;
   other_reason?: string | null;
+  notes?: string | null;
 }
 
 type FollowUp = Database['public']['Tables']['follow_ups']['Row'] & {

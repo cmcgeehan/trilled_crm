@@ -29,7 +29,12 @@ type FollowUpType = 'email' | 'sms' | 'call' | 'meeting' | 'tour'
 
 type Customer = Database['public']['Tables']['users']['Row'] & {
   status: UserStatus;
-  company_name?: string | null;
+  company_id: string | null;
+  notes: string | null;
+  companies?: {
+    id: string;
+    name: string;
+  } | null;
 }
 
 type Agent = {
@@ -255,7 +260,7 @@ export default function CustomerDetailPage({ params }: { params: Promise<{ id: s
 
       const customer = {
         ...data,
-        company_name: data.companies?.name
+        company_id: data.companies?.id
       }
 
       setCustomer(customer)
@@ -501,7 +506,7 @@ export default function CustomerDetailPage({ params }: { params: Promise<{ id: s
 
       const updatedCustomer = {
         ...updatedData,
-        company_name: updatedData.companies?.name
+        company_id: updatedData.companies?.id
       }
 
       setCustomer(updatedCustomer)
@@ -697,13 +702,13 @@ export default function CustomerDetailPage({ params }: { params: Promise<{ id: s
           <div>
             <h1 className="text-3xl font-bold text-gray-900">{getCustomerDisplayName(customer)}</h1>
             <p className="text-gray-500">
-              {customer?.company_name ? (
+              {customer?.company_id ? (
                 <>
                   <Link 
                     href={`/companies/${customer?.company_id}`}
                     className="text-brand-darkBlue/70 hover:text-brand-darkBlue hover:underline"
                   >
-                    {customer?.company_name}
+                    {customer?.companies?.name}
                   </Link>
                   {customer?.position && (
                     <>
