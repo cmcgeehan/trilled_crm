@@ -87,11 +87,18 @@ export default function UsersPage() {
 
   const loadAgents = useCallback(async () => {
     try {
-      const { data: agentUsers, error } = await supabase
+      let query = supabase
         .from('users')
         .select('*')
-        .in('role', ['agent', 'admin'])
-        .eq('organization_id', currentOrganizationId)
+        .in('role', ['agent', 'admin', 'super_admin'])
+        .is('deleted_at', null)
+
+      // Only filter by organization for non-super admins
+      if (currentUserRole !== 'super_admin') {
+        query = query.eq('organization_id', currentOrganizationId)
+      }
+
+      const { data: agentUsers, error } = await query
 
       if (error) throw error
       setAgents(agentUsers || [])
@@ -99,7 +106,7 @@ export default function UsersPage() {
       console.error('Error loading agents:', error)
       toast.error('Failed to load agents')
     }
-  }, [currentOrganizationId])
+  }, [currentOrganizationId, currentUserRole])
 
   useEffect(() => {
     const checkSession = async () => {

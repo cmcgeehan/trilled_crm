@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useCallback } from "react"
 import Link from "next/link"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
@@ -67,49 +67,68 @@ export default function CompaniesPage() {
   const [typeFilter, setTypeFilter] = useState<CompanyType | null>(null)
   const [currentUserRole, setCurrentUserRole] = useState<string | null>(null)
   const [currentOrganizationId, setCurrentOrganizationId] = useState<string | null>(null)
+  const [userContextLoaded, setUserContextLoaded] = useState(false)
 
-  useEffect(() => {
-    const loadCompanies = async () => {
-      try {
-        setDataLoading(true)
-        let query = supabase
-          .from('companies')
-          .select('*')
-          .is('deleted_at', null)
+  const loadCompanies = useCallback(async () => {
+    try {
+      setDataLoading(true)
+      console.log('Loading companies with context:', {
+        role: currentUserRole,
+        organizationId: currentOrganizationId
+      })
 
-        // Apply organization filter for non-super admins or when an org is selected
-        if (currentUserRole !== 'super_admin' && currentOrganizationId) {
-          console.log('Filtering companies by organization (non-super-admin):', currentOrganizationId)
-          query = query.eq('organization_id', currentOrganizationId)
-        } else if (currentUserRole === 'super_admin' && currentOrganizationId) {
-          console.log('Filtering by selected org ID (super-admin):', currentOrganizationId)
-          query = query.eq('organization_id', currentOrganizationId)
-        } else {
-          console.log('No organization filter applied')
-        }
+      let query = supabase
+        .from('companies')
+        .select('*')
+        .is('deleted_at', null)
 
-        if (typeFilter) {
-          query = query.eq('type', typeFilter)
-        }
-
-        query = query.order(sortField, { ascending: sortOrder === 'asc' })
-        
-        const { data, error } = await query
-        
-        if (error) {
-          console.error('Error loading companies:', error)
-          return
-        }
-        
-        setCompanies(data || [])
-      } catch (err) {
-        console.error('Error loading companies:', err)
-      } finally {
-        setDataLoading(false)
+      if (currentOrganizationId) {
+        console.log('Filtering by organization:', currentOrganizationId)
+        query = query.eq('organization_id', currentOrganizationId)
       }
+
+      if (typeFilter) {
+        query = query.eq('type', typeFilter)
+      }
+
+      query = query.order(sortField, { ascending: sortOrder === 'asc' })
+      
+      const { data, error } = await query
+      
+      if (error) {
+        console.error('Error loading companies:', error)
+        console.error('Query details:', {
+          role: currentUserRole,
+          organizationId: currentOrganizationId,
+          filters: {
+            typeFilter,
+            sortField,
+            sortOrder
+          },
+          error: {
+            code: error.code,
+            message: error.message,
+            details: error.details,
+            hint: error.hint
+          }
+        })
+        return
+      }
+      
+      setCompanies(data || [])
+    } catch (err) {
+      console.error('Error loading companies:', err)
+      if (err instanceof Error) {
+        console.error('Error details:', {
+          name: err.name,
+          message: err.message,
+          stack: err.stack
+        })
+      }
+    } finally {
+      setDataLoading(false)
     }
-    loadCompanies()
-  }, [sortField, sortOrder, typeFilter, currentOrganizationId, currentUserRole])
+  }, [currentUserRole, currentOrganizationId, typeFilter, sortField, sortOrder])
 
   useEffect(() => {
     const checkSession = async () => {
@@ -123,17 +142,24 @@ export default function CompaniesPage() {
         console.log('Session found in dashboard:', session.user.email)
         
         // Get current user's role and organization
-        const { data: userData } = await supabase
+        const { data: userData, error } = await supabase
           .from('users')
           .select('role, organization_id')
           .eq('id', session.user.id)
           .single()
         
+        if (error) {
+          console.error('Error fetching user data:', error)
+          return
+        }
+        
         if (userData) {
+          console.log('Setting user context:', userData)
           setCurrentUserRole(userData.role)
           setCurrentOrganizationId(userData.organization_id)
         }
         
+        setUserContextLoaded(true)
         setLoading(false)
       } catch (error) {
         console.error('Error checking session:', error)
@@ -143,6 +169,13 @@ export default function CompaniesPage() {
 
     checkSession()
   }, [router])
+
+  // Add effect to load companies when context is loaded
+  useEffect(() => {
+    if (userContextLoaded) {
+      loadCompanies()
+    }
+  }, [userContextLoaded, loadCompanies])
 
   const filteredCompanies = companies.filter(company => {
     const searchLower = searchTerm.toLowerCase()

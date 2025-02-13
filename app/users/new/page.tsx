@@ -113,74 +113,65 @@ export default function NewUserPage() {
     try {
       let userId: string;
 
-      // Only create auth users for agents, admins, and super admins
+      // For agents, admins, and super admins, create auth account first
       if (['agent', 'admin', 'super_admin'].includes(formData.role)) {
-        // Create auth user with login capabilities
-        const { data: authData, error: authError } = await supabase.auth.signUp({
-          email: formData.email,
-          password: generateTempPassword(),
-          options: {
-            data: {
+        // Create auth user with login capabilities using invitation via API route
+        const response = await fetch('/api/users/invite', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            email: formData.email,
+            userData: {
               first_name: formData.first_name,
               last_name: formData.last_name,
               can_login: true
             }
-          }
+          })
         })
 
-        if (authError) throw authError
-        if (!authData.user) throw new Error('Failed to create auth user')
-        
-        userId = authData.user.id
-        
-        // Wait a moment for the trigger to complete
-        await new Promise(resolve => setTimeout(resolve, 1000))
+        if (!response.ok) {
+          const error = await response.json()
+          throw new Error(error.error || 'Failed to invite user')
+        }
 
-        // Update the existing user record instead of creating a new one
-        const { error: updateError } = await supabase
-          .from('users')
-          .update({
-            first_name: formData.first_name,
-            last_name: formData.last_name,
-            email: formData.email,
-            phone: formData.phone,
-            company_id: formData.company_id || null,
-            notes: formData.notes,
-            role: formData.role,
-            status: formData.role === 'lead' ? 'new' : null,  // Set status to null for non-leads
-            owner_id: formData.owner_id,
-            created_at: new Date().toISOString(),
-            organization_id: currentOrganizationId
-          })
-          .eq('id', userId)
-
-        if (updateError) throw updateError
+        const { user: authData } = await response.json()
+        if (!authData) throw new Error('Failed to create auth user')
+        userId = authData.id
       } else {
-        // For leads and customers, just create a UUID without auth
+        // For leads and customers, generate a UUID
         userId = crypto.randomUUID()
-        
-        // Create new user directly
-        const { error: insertError } = await supabase
-          .from('users')
-          .insert({
-            id: userId,
-            first_name: formData.first_name,
-            last_name: formData.last_name,
-            email: formData.email,
-            phone: formData.phone,
-            company_id: formData.company_id || null,
-            notes: formData.notes,
-            role: formData.role,
-            status: formData.role === 'lead' ? 'new' : 'won',
-            owner_id: formData.owner_id,
-            created_at: new Date().toISOString(),
-            organization_id: currentOrganizationId
-          })
-
-        if (insertError) throw insertError
       }
 
-      // Create follow-ups immediately after user creation for leads and customers
+      // Create the user in public.users via API route
+      const createResponse = await fetch('/api/users/create', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          id: userId,
+          first_name: formData.first_name,
+          last_name: formData.last_name,
+          email: formData.email,
+          phone: formData.phone,
+          company_id: formData.company_id || null,
+          notes: formData.notes,
+          role: formData.role,
+          status: formData.role === 'lead' ? 'new' : null,
+          owner_id: formData.owner_id,
+          created_at: new Date().toISOString(),
+          organization_id: currentOrganizationId
+        })
+      })
+
+      if (!createResponse.ok) {
+        const error = await createResponse.json()
+        throw new Error(error.error || 'Failed to create user')
+      }
+
+      // Create follow-ups for leads and customers
       if (formData.role === 'lead' || formData.role === 'customer') {
         // Calculate follow-up dates
         const followUpDates = calculateFollowUpDates(new Date(), formData.role)
@@ -194,23 +185,20 @@ export default function NewUserPage() {
           next_follow_up_id: null
         }))
 
-        // Insert all follow-ups at once
-        const { data: newFollowUps, error: followUpError } = await supabase
-          .from('follow_ups')
-          .insert(followUpsToCreate)
-          .select()
+        // Create follow-ups via API route
+        const followUpResponse = await fetch('/api/users/follow-ups', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            followUps: followUpsToCreate
+          })
+        })
 
-        if (followUpError) throw followUpError
-        if (!newFollowUps) throw new Error('Failed to create follow-ups')
-
-        // Update next_follow_up_id links
-        for (let i = 0; i < newFollowUps.length - 1; i++) {
-          const { error: updateError } = await supabase
-            .from('follow_ups')
-            .update({ next_follow_up_id: newFollowUps[i + 1].id })
-            .eq('id', newFollowUps[i].id)
-
-          if (updateError) throw updateError
+        if (!followUpResponse.ok) {
+          const error = await followUpResponse.json()
+          throw new Error(error.error || 'Failed to create follow-ups')
         }
       }
 
