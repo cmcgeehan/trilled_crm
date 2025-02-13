@@ -118,6 +118,13 @@ export default function BulkUpsertPage() {
     if (!data.name) {
       errors.push('Name is required')
     }
+
+    // Validate type
+    if (!data.type) {
+      errors.push('Type is required')
+    } else if (!VALID_COMPANY_TYPES.includes(data.type)) {
+      errors.push(`Invalid company type: "${data.type}". Must be one of: ${VALID_COMPANY_TYPES.join(', ')}`)
+    }
     
     return errors
   }
@@ -278,12 +285,14 @@ export default function BulkUpsertPage() {
               
               <div className="mt-6">
                 <h3 className="text-lg font-medium mb-2">Valid Company Types</h3>
+                <p className="text-sm text-gray-600 mb-4">In your CSV file, use the exact lowercase values with underscores shown in <code>code</code> below:</p>
                 <div className="grid grid-cols-2 md:grid-cols-3 gap-2 text-sm text-gray-600">
                   {VALID_COMPANY_TYPES.map(type => (
                     <div key={type} className="p-2 bg-gray-50 rounded">
-                      {type.split('_').map(word => 
+                      <div>{type.split('_').map(word => 
                         word.charAt(0).toUpperCase() + word.slice(1)
-                      ).join(' ')}
+                      ).join(' ')}</div>
+                      <code className="text-xs bg-gray-100 px-1 rounded">{type}</code>
                     </div>
                   ))}
                 </div>
