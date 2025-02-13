@@ -8,6 +8,7 @@ export async function middleware(request: NextRequest) {
     console.log('Middleware handling request:', {
       pathname: request.nextUrl.pathname,
       search: request.nextUrl.search,
+      hash: request.nextUrl.hash,
       fullUrl: request.url
     })
 
@@ -26,6 +27,10 @@ export async function middleware(request: NextRequest) {
     const hasAuthParams = request.nextUrl.searchParams.has('token') || 
                          request.nextUrl.searchParams.get('type') === 'invite'
 
+    // Check for auth-related hash parameters
+    const hasAuthHash = request.nextUrl.hash.includes('access_token') && 
+                       request.nextUrl.hash.includes('type=invite')
+
     // Public routes that don't require authentication
     const publicRoutes = ['/login', '/auth/callback', '/auth/verify', '/auth/initial-verify']
     const isPublicRoute = publicRoutes.some(route => request.nextUrl.pathname.startsWith(route))
@@ -34,14 +39,16 @@ export async function middleware(request: NextRequest) {
       hasSession: !!session,
       isPublicRoute,
       hasAuthParams,
+      hasAuthHash,
       pathname: request.nextUrl.pathname
     })
 
     // Allow the request if:
     // 1. It's a public route OR
     // 2. It has auth-related parameters OR
-    // 3. User has a session
-    if (isPublicRoute || hasAuthParams || session) {
+    // 3. It has auth-related hash parameters OR
+    // 4. User has a session
+    if (isPublicRoute || hasAuthParams || hasAuthHash || session) {
       return res
     }
 

@@ -21,7 +21,11 @@ export default function AuthHandler() {
 
         if (accessToken && type === 'invite') {
           console.log('Found access token in hash, redirecting to verify')
-          router.push(`/auth/verify?token=${accessToken}&type=${type}`)
+          // If we're on the login page, remove the redirectTo param
+          const verifyUrl = new URL('/auth/verify', window.location.href)
+          verifyUrl.searchParams.set('token', accessToken)
+          verifyUrl.searchParams.set('type', type)
+          router.push(verifyUrl.pathname + verifyUrl.search)
           return
         }
       }
