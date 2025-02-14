@@ -21,3 +21,10 @@ export const calculateFollowUpDates = (createdDate: Date, role: 'lead' | 'custom
   
   return dates
 }
+
+export const formatCompanyType = (type: string) => {
+  return type
+    .split('_')
+    .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(' ')
+}

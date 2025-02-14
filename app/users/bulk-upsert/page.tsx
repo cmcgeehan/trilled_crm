@@ -15,6 +15,23 @@ type ValidationError = {
   errors: string[];
 }
 
+type UserStatus = 'needs_response' | 'new' | 'follow_up' | 'won' | 'lost'
+
+type UserData = {
+  id?: string;
+  first_name: string;
+  last_name: string;
+  email: string;
+  phone?: string | null;
+  position?: string | null;
+  role: UserRole;
+  status: UserStatus;
+  company_id?: string | null;
+  owner_id?: string | null;
+  organization_id?: string | null;
+  notes?: string | null;
+}
+
 const FIELDS = [
   { name: 'first_name', description: 'First name (required)' },
   { name: 'last_name', description: 'Last name (required)' },
@@ -237,83 +254,130 @@ export default function BulkUpsertPage() {
       }
 
       // Process all valid users
+      // First, get all existing users in one query
+      const userEmails = usersToProcess.map(u => u.email?.toLowerCase()).filter((email): email is string => email !== null)
+      const { data: existingUsers, error: lookupError } = await supabase
+        .from('users')
+        .select('id, email')
+        .in('email', userEmails)
+
+      if (lookupError) {
+        console.error('Error looking up users:', lookupError)
+        throw new Error(`Error looking up users: ${lookupError.message}`)
+      }
+
+      // Create a map of existing users by email for quick lookup
+      const existingUserMap = new Map(
+        existingUsers?.map(user => [user.email.toLowerCase(), user]) || []
+      )
+
+      // Create maps for companies and owners to avoid repeated lookups
+      const companyNames = new Set(usersToProcess.map(u => u.company_name).filter((name): name is string => name !== null))
+      const ownerEmails = new Set(usersToProcess.map(u => u.owner_email).filter((email): email is string => email !== null))
+
+      // Batch lookup companies
+      let companiesQuery = supabase
+        .from('companies')
+        .select('id, name')
+        .in('name', Array.from(companyNames))
+        .is('deleted_at', null)
+
+      if (currentUserRole === 'admin' && currentOrganizationId) {
+        companiesQuery = companiesQuery.eq('organization_id', currentOrganizationId)
+      }
+
+      const { data: companies } = await companiesQuery
+      const companyMap = new Map(
+        companies?.map(company => [company.name, company.id]) || []
+      )
+
+      // Batch lookup owners
+      let ownersQuery = supabase
+        .from('users')
+        .select('id, email')
+        .in('email', Array.from(ownerEmails))
+        .in('role', ['agent', 'admin', 'super_admin'])
+
+      if (currentUserRole === 'admin' && currentOrganizationId) {
+        ownersQuery = ownersQuery.eq('organization_id', currentOrganizationId)
+      }
+
+      const { data: owners } = await ownersQuery
+      const ownerMap = new Map(
+        owners?.map(owner => [owner.email.toLowerCase(), owner.id]) || []
+      )
+
+      // Prepare users for update/insert
+      const usersToUpdate: UserData[] = []
+      const usersToInsert: UserData[] = []
+
       for (const userData of usersToProcess) {
-        // Look up company ID if company_name is provided
+        if (!userData.email) continue
+
+        const processedUser: UserData = {
+          first_name: userData.first_name || '',
+          last_name: userData.last_name || '',
+          email: userData.email,
+          phone: userData.phone || null,
+          position: userData.position || null,
+          role: (userData.role as UserRole) || 'lead',
+          status: (userData.status as UserStatus) || 'new',
+          organization_id: currentOrganizationId,
+          notes: userData.notes || null
+        }
+
+        // Set company_id if company_name exists and was found
         if (userData.company_name) {
-          let query = supabase
-            .from('companies')
-            .select('id')
-            .eq('name', userData.company_name)
-            .is('deleted_at', null)
-
-          // If admin, restrict to their organization's companies
-          if (currentUserRole === 'admin' && currentOrganizationId) {
-            query = query.eq('organization_id', currentOrganizationId)
+          const companyId = companyMap.get(userData.company_name)
+          if (companyId) {
+            processedUser.company_id = companyId
           }
-          
-          const { data: companyData } = await query.single()
-          
-          if (companyData) {
-            userData.company_id = companyData.id
-          }
-          delete userData.company_name
         }
 
-        // Look up owner ID if owner_email is provided
+        // Set owner_id if owner_email exists and was found
         if (userData.owner_email) {
-          let query = supabase
-            .from('users')
-            .select('id')
-            .eq('email', userData.owner_email)
-            .in('role', ['agent', 'admin', 'super_admin'])
-
-          // If admin, restrict to their organization's users
-          if (currentUserRole === 'admin' && currentOrganizationId) {
-            query = query.eq('organization_id', currentOrganizationId)
+          const ownerId = ownerMap.get(userData.owner_email.toLowerCase())
+          if (ownerId) {
+            processedUser.owner_id = ownerId
           }
-          
-          const { data: ownerData } = await query.single()
-          
-          if (ownerData) {
-            userData.owner_id = ownerData.id
-          }
-          delete userData.owner_email
         }
 
-        // Set defaults and organization
-        userData.role = userData.role || 'lead'
-        userData.status = userData.status || 'new'
-        userData.organization_id = currentOrganizationId
+        const existingUser = existingUserMap.get(userData.email.toLowerCase())
+        if (existingUser) {
+          usersToUpdate.push({
+            ...processedUser,
+            id: existingUser.id
+          })
+        } else {
+          usersToInsert.push(processedUser)
+        }
+      }
 
-        // Check if user exists
-        if (userData.email) {
-          const { data: existingUser } = await supabase
-            .from('users')
-            .select('id')
-            .eq('email', userData.email)
-            .single()
+      // Process updates in batches of 50
+      for (let i = 0; i < usersToUpdate.length; i += 50) {
+        const batch = usersToUpdate.slice(i, i + 50)
+        const { error: updateError } = await supabase
+          .from('users')
+          .upsert(batch)
 
-          if (existingUser) {
-            // Update existing user
-            const { error: updateError } = await supabase
-              .from('users')
-              .update(userData)
-              .eq('id', existingUser.id)
+        if (updateError) throw updateError
+      }
 
-            if (updateError) throw updateError
-          } else {
-            // Create new user
-            const { data: newUser, error: createError } = await supabase
-              .from('users')
-              .insert([userData])
-              .select()
-              .single()
+      // Process inserts in batches of 50
+      for (let i = 0; i < usersToInsert.length; i += 50) {
+        const batch = usersToInsert.slice(i, i + 50)
+        const { data: newUsers, error: insertError } = await supabase
+          .from('users')
+          .insert(batch)
+          .select('id, role')
 
-            if (createError) throw createError
+        if (insertError) throw insertError
 
-            // Create follow-up sequence for leads and customers
-            if (newUser && ['lead', 'customer'].includes(userData.role)) {
-              const followUpDates = calculateFollowUpDates(new Date(), userData.role as 'lead' | 'customer')
+        // Create follow-up sequences for new leads and customers
+        if (newUsers) {
+          for (const newUser of newUsers as { id: string; role: UserRole }[]) {
+            if (['lead', 'customer'].includes(newUser.role)) {
+              const followUpDates = calculateFollowUpDates(new Date(), newUser.role as 'lead' | 'customer')
               
               let previousFollowUpId: string | null = null
               for (const date of followUpDates) {

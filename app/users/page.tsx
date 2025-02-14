@@ -59,6 +59,7 @@ export default function UsersPage() {
       let countQuery = supabase
         .from('users')
         .select('*', { count: 'exact', head: true })
+        .is('deleted_at', null)
 
       if (currentOrganizationId) {
         countQuery = countQuery.eq('organization_id', currentOrganizationId)
@@ -89,6 +90,7 @@ export default function UsersPage() {
       let query = supabase
         .from('users')
         .select('*')
+        .is('deleted_at', null)
         .order(sortField, { ascending: sortOrder === 'asc' })
         .range((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage - 1)
 

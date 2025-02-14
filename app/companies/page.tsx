@@ -12,6 +12,7 @@ import { format } from "date-fns"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { useRouter } from "next/navigation"
 import { Database } from "@/types/supabase"
+import { formatCompanyType } from "@/lib/utils"
 
 type Company = Database['public']['Tables']['companies']['Row'] & {
   street_address?: string | null;
@@ -65,6 +66,7 @@ export default function CompaniesPage() {
   const [sortField, setSortField] = useState<SortField>('created_at')
   const [sortOrder, setSortOrder] = useState<SortOrder>('desc')
   const [typeFilter, setTypeFilter] = useState<CompanyType | null>(null)
+  const [neighborhoodFilter, setNeighborhoodFilter] = useState<string | null>(null)
   const [currentUserRole, setCurrentUserRole] = useState<string | null>(null)
   const [currentOrganizationId, setCurrentOrganizationId] = useState<string | null>(null)
   const [userContextLoaded, setUserContextLoaded] = useState(false)
@@ -94,6 +96,10 @@ export default function CompaniesPage() {
         countQuery = countQuery.eq('type', typeFilter)
       }
 
+      if (neighborhoodFilter) {
+        countQuery = countQuery.eq('neighborhood', neighborhoodFilter)
+      }
+
       const { count, error: countError } = await countQuery
 
       if (countError) {
@@ -117,6 +123,10 @@ export default function CompaniesPage() {
         query = query.eq('type', typeFilter)
       }
 
+      if (neighborhoodFilter) {
+        query = query.eq('neighborhood', neighborhoodFilter)
+      }
+
       query = query
         .order(sortField, { ascending: sortOrder === 'asc' })
         .range((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage - 1)
@@ -134,7 +144,7 @@ export default function CompaniesPage() {
     } finally {
       setDataLoading(false)
     }
-  }, [currentUserRole, currentOrganizationId, typeFilter, sortField, sortOrder, currentPage, itemsPerPage])
+  }, [currentUserRole, currentOrganizationId, typeFilter, sortField, sortOrder, currentPage, itemsPerPage, neighborhoodFilter])
 
   useEffect(() => {
     const checkSession = async () => {
@@ -209,6 +219,7 @@ export default function CompaniesPage() {
 
   const handleClearFilters = () => {
     setTypeFilter(null)
+    setNeighborhoodFilter(null)
     setSearchTerm("")
   }
 
@@ -305,6 +316,20 @@ export default function CompaniesPage() {
             <SelectItem value="ymca">YMCA</SelectItem>
           </SelectContent>
         </Select>
+        <Select
+          value={neighborhoodFilter || "all"}
+          onValueChange={(value) => setNeighborhoodFilter(value === "all" ? null : value)}
+        >
+          <SelectTrigger className="w-[180px]">
+            <SelectValue placeholder="Filter by neighborhood" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Neighborhoods</SelectItem>
+            {Array.from(new Set(companies.map(c => c.neighborhood).filter(Boolean))).sort().map(neighborhood => (
+              <SelectItem key={neighborhood!} value={neighborhood!}>{neighborhood}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
         <Button variant="outline" onClick={handleClearFilters}>
           Clear Filters
         </Button>
@@ -326,6 +351,7 @@ export default function CompaniesPage() {
               >
                 Type {getSortIcon('type')}
               </TableHead>
+              <TableHead className="text-sm font-medium">Neighborhood</TableHead>
               <TableHead className="text-sm font-medium">Address</TableHead>
               <TableHead 
                 className="text-sm font-medium cursor-pointer whitespace-nowrap"
@@ -359,8 +385,11 @@ export default function CompaniesPage() {
                   <TableCell className="py-2 text-sm font-medium">{company.name}</TableCell>
                   <TableCell className="py-2">
                     <Badge variant="secondary" className="text-xs px-2 py-0.5">
-                      {company.type || 'N/A'}
+                      {company.type ? formatCompanyType(company.type) : 'N/A'}
                     </Badge>
+                  </TableCell>
+                  <TableCell className="py-2 text-sm">
+                    {company.neighborhood || <span className="text-gray-400">No neighborhood</span>}
                   </TableCell>
                   <TableCell className="py-2 text-sm">
                     {[

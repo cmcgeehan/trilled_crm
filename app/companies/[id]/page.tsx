@@ -16,6 +16,7 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogT
 import { AlertTriangle } from "lucide-react"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { Textarea } from "@/components/ui/textarea"
+import { formatCompanyType } from "@/lib/utils"
 
 type Company = Database['public']['Tables']['companies']['Row'] & {
   street_address?: string | null;
@@ -299,7 +300,7 @@ export default function CompanyDetailsPage({ params }: { params: Promise<{ id: s
           <h1 className="text-3xl font-bold text-gray-900">{company.name}</h1>
           <div className="mt-2">
             <Badge variant="secondary">
-              {company.type || 'No Type Set'}
+              {company.type ? formatCompanyType(company.type) : 'No Type Set'}
             </Badge>
           </div>
         </div>
