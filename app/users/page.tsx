@@ -48,14 +48,49 @@ export default function UsersPage() {
   const [currentUserRole, setCurrentUserRole] = useState<UserRole | null>(null)
   const [currentOrganizationId, setCurrentOrganizationId] = useState<string | null>(null)
   const [userContextLoaded, setUserContextLoaded] = useState(false)
+  const [currentPage, setCurrentPage] = useState(1)
+  const [totalCount, setTotalCount] = useState(0)
+  const itemsPerPage = 20
 
   const loadUsers = useCallback(async () => {
     setDataLoading(true)
     try {
+      // First get total count
+      let countQuery = supabase
+        .from('users')
+        .select('*', { count: 'exact', head: true })
+
+      if (currentOrganizationId) {
+        countQuery = countQuery.eq('organization_id', currentOrganizationId)
+      }
+
+      if (roleFilter) {
+        countQuery = countQuery.eq('role', roleFilter)
+      }
+
+      if (statusFilter) {
+        countQuery = countQuery.eq('status', statusFilter)
+      }
+
+      if (ownerFilter !== 'all') {
+        countQuery = countQuery.eq('owner_id', ownerFilter)
+      }
+
+      const { count, error: countError } = await countQuery
+
+      if (countError) {
+        console.error('Error getting count:', countError)
+        return
+      }
+
+      setTotalCount(count || 0)
+
+      // Then get paginated data
       let query = supabase
         .from('users')
         .select('*')
         .order(sortField, { ascending: sortOrder === 'asc' })
+        .range((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage - 1)
 
       if (currentOrganizationId) {
         query = query.eq('organization_id', currentOrganizationId)
@@ -83,7 +118,7 @@ export default function UsersPage() {
     } finally {
       setDataLoading(false)
     }
-  }, [sortField, sortOrder, currentOrganizationId, roleFilter, statusFilter, ownerFilter])
+  }, [sortField, sortOrder, currentOrganizationId, roleFilter, statusFilter, ownerFilter, currentPage, itemsPerPage])
 
   const loadAgents = useCallback(async () => {
     try {
@@ -182,6 +217,12 @@ export default function UsersPage() {
     setStatusFilter(null)
     setOwnerFilter('all')
     setSearchTerm("")
+  }
+
+  const totalPages = Math.ceil(totalCount / itemsPerPage)
+
+  const handlePageChange = (newPage: number) => {
+    setCurrentPage(newPage)
   }
 
   if (loading || dataLoading || !userContextLoaded) {
@@ -396,6 +437,40 @@ export default function UsersPage() {
             )}
           </TableBody>
         </Table>
+      </div>
+
+      <div className="flex items-center justify-between px-2 py-4">
+        <div className="text-sm text-muted-foreground">
+          Showing {Math.min((currentPage - 1) * itemsPerPage + 1, totalCount)} to {Math.min(currentPage * itemsPerPage, totalCount)} of {totalCount} entries
+        </div>
+        <div className="flex gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => handlePageChange(currentPage - 1)}
+            disabled={currentPage === 1}
+          >
+            Previous
+          </Button>
+          {Array.from({ length: totalPages }, (_, i) => i + 1).map((page) => (
+            <Button
+              key={page}
+              variant={currentPage === page ? "default" : "outline"}
+              size="sm"
+              onClick={() => handlePageChange(page)}
+            >
+              {page}
+            </Button>
+          ))}
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => handlePageChange(currentPage + 1)}
+            disabled={currentPage === totalPages}
+          >
+            Next
+          </Button>
+        </div>
       </div>
     </div>
   )

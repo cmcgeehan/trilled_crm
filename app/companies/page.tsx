@@ -68,6 +68,9 @@ export default function CompaniesPage() {
   const [currentUserRole, setCurrentUserRole] = useState<string | null>(null)
   const [currentOrganizationId, setCurrentOrganizationId] = useState<string | null>(null)
   const [userContextLoaded, setUserContextLoaded] = useState(false)
+  const [currentPage, setCurrentPage] = useState(1)
+  const [totalCount, setTotalCount] = useState(0)
+  const itemsPerPage = 20
 
   const loadCompanies = useCallback(async () => {
     try {
@@ -77,13 +80,36 @@ export default function CompaniesPage() {
         organizationId: currentOrganizationId
       })
 
+      // First get total count
+      let countQuery = supabase
+        .from('companies')
+        .select('*', { count: 'exact', head: true })
+        .is('deleted_at', null)
+
+      if (currentOrganizationId) {
+        countQuery = countQuery.eq('organization_id', currentOrganizationId)
+      }
+
+      if (typeFilter) {
+        countQuery = countQuery.eq('type', typeFilter)
+      }
+
+      const { count, error: countError } = await countQuery
+
+      if (countError) {
+        console.error('Error getting count:', countError)
+        return
+      }
+
+      setTotalCount(count || 0)
+
+      // Then get paginated data
       let query = supabase
         .from('companies')
         .select('*')
         .is('deleted_at', null)
 
       if (currentOrganizationId) {
-        console.log('Filtering by organization:', currentOrganizationId)
         query = query.eq('organization_id', currentOrganizationId)
       }
 
@@ -91,44 +117,24 @@ export default function CompaniesPage() {
         query = query.eq('type', typeFilter)
       }
 
-      query = query.order(sortField, { ascending: sortOrder === 'asc' })
+      query = query
+        .order(sortField, { ascending: sortOrder === 'asc' })
+        .range((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage - 1)
       
       const { data, error } = await query
       
       if (error) {
         console.error('Error loading companies:', error)
-        console.error('Query details:', {
-          role: currentUserRole,
-          organizationId: currentOrganizationId,
-          filters: {
-            typeFilter,
-            sortField,
-            sortOrder
-          },
-          error: {
-            code: error.code,
-            message: error.message,
-            details: error.details,
-            hint: error.hint
-          }
-        })
         return
       }
       
       setCompanies(data || [])
     } catch (err) {
       console.error('Error loading companies:', err)
-      if (err instanceof Error) {
-        console.error('Error details:', {
-          name: err.name,
-          message: err.message,
-          stack: err.stack
-        })
-      }
     } finally {
       setDataLoading(false)
     }
-  }, [currentUserRole, currentOrganizationId, typeFilter, sortField, sortOrder])
+  }, [currentUserRole, currentOrganizationId, typeFilter, sortField, sortOrder, currentPage, itemsPerPage])
 
   useEffect(() => {
     const checkSession = async () => {
@@ -204,6 +210,12 @@ export default function CompaniesPage() {
   const handleClearFilters = () => {
     setTypeFilter(null)
     setSearchTerm("")
+  }
+
+  const totalPages = Math.ceil(totalCount / itemsPerPage)
+
+  const handlePageChange = (newPage: number) => {
+    setCurrentPage(newPage)
   }
 
   if (loading || dataLoading) {
@@ -378,6 +390,40 @@ export default function CompaniesPage() {
             )}
           </TableBody>
         </Table>
+      </div>
+
+      <div className="flex items-center justify-between px-2 py-4">
+        <div className="text-sm text-muted-foreground">
+          Showing {Math.min((currentPage - 1) * itemsPerPage + 1, totalCount)} to {Math.min(currentPage * itemsPerPage, totalCount)} of {totalCount} entries
+        </div>
+        <div className="flex gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => handlePageChange(currentPage - 1)}
+            disabled={currentPage === 1}
+          >
+            Previous
+          </Button>
+          {Array.from({ length: totalPages }, (_, i) => i + 1).map((page) => (
+            <Button
+              key={page}
+              variant={currentPage === page ? "default" : "outline"}
+              size="sm"
+              onClick={() => handlePageChange(page)}
+            >
+              {page}
+            </Button>
+          ))}
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => handlePageChange(currentPage + 1)}
+            disabled={currentPage === totalPages}
+          >
+            Next
+          </Button>
+        </div>
       </div>
     </div>
   )

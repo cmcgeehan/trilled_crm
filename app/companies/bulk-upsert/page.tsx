@@ -59,6 +59,20 @@ type ValidationError = {
   errors: string[];
 }
 
+// Add type definition for company data
+type CompanyData = {
+  id?: string;
+  name: string;
+  type: string;
+  street_address?: string | null;
+  neighborhood?: string | null;
+  city?: string | null;
+  state?: string | null;
+  postal_code?: string | null;
+  country?: string | null;
+  organization_id?: string | null;
+}
+
 export default function BulkUpsertPage() {
   const router = useRouter()
   const [file, setFile] = useState<File | null>(null)
@@ -199,42 +213,83 @@ export default function BulkUpsertPage() {
       }
 
       // Process all valid companies
-      for (const companyData of companiesToProcess) {
-        if (!companyData.name) continue // Skip if no name
+      // First, get all existing companies in one query
+      let existingCompaniesQuery = supabase
+        .from('companies')
+        .select('id, name')
+        .in('name', companyNames)
+        .is('deleted_at', null)
 
-        // Check if company exists
-        let query = supabase
-          .from('companies')
-          .select('id')
-          .eq('name', companyData.name)
-          .is('deleted_at', null)
+      if (currentUserRole === 'admin' && currentOrganizationId) {
+        existingCompaniesQuery = existingCompaniesQuery.eq('organization_id', currentOrganizationId)
+      }
 
-        // If admin, restrict to their organization's companies
-        if (currentUserRole === 'admin' && currentOrganizationId) {
-          query = query.eq('organization_id', currentOrganizationId)
-        }
+      const { data: existingCompanies, error: lookupError } = await existingCompaniesQuery
 
-        const { data: existingCompany } = await query.single()
+      if (lookupError) {
+        console.error('Error looking up companies:', lookupError)
+        throw new Error(`Error looking up companies: ${lookupError.message}`)
+      }
 
+      // Create a map of existing companies by name for quick lookup
+      const existingCompanyMap = new Map(
+        existingCompanies?.map(company => [company.name, company]) || []
+      )
+
+      // Separate companies into updates and inserts
+      const companiesToUpdate: CompanyData[] = []
+      const companiesToInsert: CompanyData[] = []
+
+      companiesToProcess.forEach(companyData => {
+        if (!companyData.name || !companyData.type) return // Skip invalid data
+        
+        const existingCompany = existingCompanyMap.get(companyData.name)
         if (existingCompany) {
-          // Update existing company
-          const { error: updateError } = await supabase
-            .from('companies')
-            .update(companyData)
-            .eq('id', existingCompany.id)
-
-          if (updateError) throw updateError
+          companiesToUpdate.push({
+            name: companyData.name,
+            type: companyData.type,
+            street_address: companyData.street_address || null,
+            neighborhood: companyData.neighborhood || null,
+            city: companyData.city || null,
+            state: companyData.state || null,
+            postal_code: companyData.postal_code || null,
+            country: companyData.country || null,
+            id: existingCompany.id,
+            organization_id: currentOrganizationId
+          })
         } else {
-          // Create new company
-          const { error: createError } = await supabase
-            .from('companies')
-            .insert([{
-              ...companyData,
-              organization_id: currentOrganizationId
-            }])
-
-          if (createError) throw createError
+          companiesToInsert.push({
+            name: companyData.name,
+            type: companyData.type,
+            street_address: companyData.street_address || null,
+            neighborhood: companyData.neighborhood || null,
+            city: companyData.city || null,
+            state: companyData.state || null,
+            postal_code: companyData.postal_code || null,
+            country: companyData.country || null,
+            organization_id: currentOrganizationId
+          })
         }
+      })
+
+      // Process updates in batches of 50
+      for (let i = 0; i < companiesToUpdate.length; i += 50) {
+        const batch = companiesToUpdate.slice(i, i + 50)
+        const { error: updateError } = await supabase
+          .from('companies')
+          .upsert(batch)
+
+        if (updateError) throw updateError
+      }
+
+      // Process inserts in batches of 50
+      for (let i = 0; i < companiesToInsert.length; i += 50) {
+        const batch = companiesToInsert.slice(i, i + 50)
+        const { error: insertError } = await supabase
+          .from('companies')
+          .insert(batch)
+
+        if (insertError) throw insertError
       }
 
       setSuccess(true)
