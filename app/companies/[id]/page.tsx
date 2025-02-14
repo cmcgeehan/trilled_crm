@@ -13,9 +13,6 @@ import { supabase } from "@/lib/supabase"
 import { Database } from "@/types/supabase"
 import { use } from "react"
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
-import { AlertTriangle } from "lucide-react"
-import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
-import { Textarea } from "@/components/ui/textarea"
 import { formatCompanyType } from "@/lib/utils"
 
 type Company = Database['public']['Tables']['companies']['Row'] & {
@@ -26,8 +23,6 @@ type Company = Database['public']['Tables']['companies']['Row'] & {
   postal_code?: string | null;
   country?: string | null;
   status?: string;
-  lost_reason?: string | null;
-  other_reason?: string | null;
   type: CompanyType;
 }
 
@@ -66,14 +61,6 @@ type CompanyType =
 
 type User = Database['public']['Tables']['users']['Row']
 
-const lostReasons = [
-  { id: "budget", label: "Budget constraints" },
-  { id: "competitor", label: "Chose a competitor" },
-  { id: "timing", label: "Bad timing" },
-  { id: "needs", label: "Needs not met" },
-  { id: "other", label: "Other" },
-]
-
 export default function CompanyDetailsPage({ params }: { params: Promise<{ id: string }> }) {
   const id = use(params).id
   const router = useRouter()
@@ -86,9 +73,6 @@ export default function CompanyDetailsPage({ params }: { params: Promise<{ id: s
   const [currentOrganizationId, setCurrentOrganizationId] = useState<string | null>(null)
   const [isDeleting, setIsDeleting] = useState(false)
   const [deleteError, setDeleteError] = useState<string | null>(null)
-  const [isMarkingAsLost, setIsMarkingAsLost] = useState(false)
-  const [lostReason, setLostReason] = useState<string | null>(null)
-  const [otherReason, setOtherReason] = useState<string>("")
 
   useEffect(() => {
     const loadCompanyAndUsers = async () => {
@@ -243,36 +227,6 @@ export default function CompanyDetailsPage({ params }: { params: Promise<{ id: s
     }
   }
 
-  const handleMarkAsLost = async () => {
-    if (!company) return
-
-    try {
-      setLoading(true)
-      const updates: Database['public']['Tables']['companies']['Update'] = {
-        lost_reason: lostReason || undefined,
-        other_reason: lostReason === "other" ? otherReason : undefined,
-      }
-
-      const { error: markError } = await supabase
-        .from('companies')
-        .update(updates)
-        .eq('id', id)
-
-      if (markError) throw markError
-
-      setCompany(prev => prev ? {
-        ...prev,
-        lost_reason: lostReason || null,
-        other_reason: lostReason === "other" ? otherReason : null,
-      } : null)
-    } catch (err) {
-      console.error('Error marking company as lost:', err)
-    } finally {
-      setLoading(false)
-      setIsMarkingAsLost(false)
-    }
-  }
-
   const handleTypeChange = (value: string) => {
     setEditedCompany(prev => prev ? { ...prev, type: value as CompanyType } : null)
   }
@@ -331,49 +285,6 @@ export default function CompanyDetailsPage({ params }: { params: Promise<{ id: s
               </DialogFooter>
             </DialogContent>
           </Dialog>
-          {company?.status !== 'lost' && (
-            <Dialog open={isMarkingAsLost} onOpenChange={setIsMarkingAsLost}>
-              <DialogTrigger asChild>
-                <Button variant="outline" className="text-red-600 border-red-600 hover:bg-red-50" onClick={() => setIsMarkingAsLost(true)}>
-                  <AlertTriangle className="mr-2 h-4 w-4" /> Mark as Lost
-                </Button>
-              </DialogTrigger>
-              <DialogContent>
-                <DialogHeader>
-                  <DialogTitle>Mark Company as Lost</DialogTitle>
-                </DialogHeader>
-                <div className="py-4">
-                  <Label htmlFor="lost-reason" className="mb-2 block">
-                    Select a reason:
-                  </Label>
-                  <RadioGroup id="lost-reason" value={lostReason || ''} onValueChange={setLostReason}>
-                    {lostReasons.map((reason) => (
-                      <div key={reason.id} className="flex items-center space-x-2">
-                        <RadioGroupItem value={reason.id} id={reason.id} />
-                        <Label htmlFor={reason.id}>{reason.label}</Label>
-                      </div>
-                    ))}
-                  </RadioGroup>
-                  {lostReason === "other" && (
-                    <Textarea
-                      placeholder="Please specify the reason"
-                      value={otherReason}
-                      onChange={(e) => setOtherReason(e.target.value)}
-                      className="mt-2"
-                    />
-                  )}
-                </div>
-                <DialogFooter>
-                  <Button variant="outline" onClick={() => setIsMarkingAsLost(false)}>
-                    Cancel
-                  </Button>
-                  <Button variant="destructive" onClick={handleMarkAsLost}>
-                    Mark as Lost
-                  </Button>
-                </DialogFooter>
-              </DialogContent>
-            </Dialog>
-          )}
         </div>
       </div>
 

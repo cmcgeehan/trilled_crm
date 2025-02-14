@@ -7,7 +7,8 @@ import { supabase } from "@/lib/supabase"
 import { useRouter } from "next/navigation"
 import { calculateFollowUpDates } from "@/lib/utils"
 
-type UserRole = 'lead' | 'customer' | 'agent' | 'admin' | 'super_admin'
+type UserRole = 'lead' | 'customer' | 'agent'
+type AllUserRole = UserRole | 'admin' | 'super_admin'
 
 type ValidationError = {
   row: number;
@@ -44,7 +45,7 @@ const FIELDS = [
   { name: 'notes', description: 'Additional notes (optional)' },
 ]
 
-const VALID_ROLES = ['lead', 'customer', 'agent', 'admin', 'super_admin'] as const
+const VALID_ROLES = ['lead', 'customer', 'agent'] as const
 
 export default function BulkUpsertPage() {
   const router = useRouter()
@@ -53,7 +54,7 @@ export default function BulkUpsertPage() {
   const [error, setError] = useState<string | null>(null)
   const [validationErrors, setValidationErrors] = useState<ValidationError[]>([])
   const [success, setSuccess] = useState(false)
-  const [currentUserRole, setCurrentUserRole] = useState<UserRole | null>(null)
+  const [currentUserRole, setCurrentUserRole] = useState<AllUserRole | null>(null)
   const [currentOrganizationId, setCurrentOrganizationId] = useState<string | null>(null)
 
   useEffect(() => {
@@ -79,7 +80,7 @@ export default function BulkUpsertPage() {
           return
         }
 
-        setCurrentUserRole(userData.role as UserRole)
+        setCurrentUserRole(userData.role as AllUserRole)
         setCurrentOrganizationId(userData.organization_id)
         setLoading(false)
       } catch (error) {
@@ -110,8 +111,14 @@ export default function BulkUpsertPage() {
     }
 
     // Validate role if provided
-    if (data.role && !VALID_ROLES.includes(data.role as UserRole)) {
-      errors.push(`Invalid role: ${data.role}. Must be one of: ${VALID_ROLES.join(', ')}`)
+    if (data.role) {
+      const role = data.role as string
+      // Check if trying to create/update admin or super_admin
+      if (role === 'admin' || role === 'super_admin') {
+        errors.push('Cannot create or update admin or super admin users through bulk upsert')
+      } else if (!VALID_ROLES.includes(role as UserRole)) {
+        errors.push(`Invalid role: ${role}. Must be one of: ${VALID_ROLES.join(', ')}`)
+      }
     }
 
     // Super admins can create users in any org, admins only in their org

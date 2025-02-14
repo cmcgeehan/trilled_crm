@@ -327,8 +327,12 @@ export default function NewUserPage() {
                       <SelectItem value="lead">Lead</SelectItem>
                       <SelectItem value="customer">Customer</SelectItem>
                       <SelectItem value="agent">Agent</SelectItem>
-                      <SelectItem value="admin">Admin</SelectItem>
-                      <SelectItem value="super_admin">Super Admin</SelectItem>
+                      {['admin', 'super_admin'].includes(currentUserRole || '') && (
+                        <SelectItem value="admin">Admin</SelectItem>
+                      )}
+                      {currentUserRole === 'super_admin' && (
+                        <SelectItem value="super_admin">Super Admin</SelectItem>
+                      )}
                     </SelectContent>
                   </Select>
                 </div>

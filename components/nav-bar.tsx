@@ -235,9 +235,6 @@ export function NavBar() {
                 <DropdownMenuLabel>{userEmail}</DropdownMenuLabel>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem asChild>
-                  <Link href="/account">Profile</Link>
-                </DropdownMenuItem>
-                <DropdownMenuItem asChild>
                   <Link href="/account/integrations">Integrations</Link>
                 </DropdownMenuItem>
                 <DropdownMenuItem onClick={handleSignOut}>
