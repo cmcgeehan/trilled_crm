@@ -47,6 +47,13 @@ const FIELDS = [
 
 const VALID_ROLES = ['lead', 'customer', 'agent'] as const
 
+type ValidationResult = {
+  errors: Map<number, string[]>;
+  companyMap: Map<string, string>;
+  ownerMap: Map<string, string>;
+  validOwnerEmails: Set<string>;
+}
+
 export default function BulkUpsertPage() {
   const router = useRouter()
   const [file, setFile] = useState<File | null>(null)
@@ -94,7 +101,7 @@ export default function BulkUpsertPage() {
 
   const validateRows = async (
     rows: Record<string, string | null>[]
-  ): Promise<Map<number, string[]>> => {
+  ): Promise<ValidationResult> => {
     const errors = new Map<number, string[]>()
     
     // Collect all unique company names and owner emails for batch validation
@@ -123,7 +130,7 @@ export default function BulkUpsertPage() {
     }
 
     const companies = await companiesResponse.json() as Array<{ id: string; name: string }>
-    const existingCompanyNames = new Set(companies.map(c => c.name))
+    const companyMap = new Map(companies.map(company => [company.name, company.id]))
 
     // Use API route to check owners
     const ownersResponse = await fetch('/api/users/check-owners', {
@@ -142,6 +149,7 @@ export default function BulkUpsertPage() {
     }
 
     const owners = await ownersResponse.json() as Array<{ id: string; email: string; role: string }>
+    const ownerMap = new Map(owners.map(owner => [owner.email.toLowerCase(), owner.id]))
     const validOwnerEmails = new Set(owners.map(o => o.email))
 
     // Validate each row
@@ -191,7 +199,12 @@ export default function BulkUpsertPage() {
       }
     })
 
-    return errors
+    return { 
+      errors, 
+      companyMap, 
+      ownerMap,
+      validOwnerEmails 
+    }
   }
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -294,14 +307,14 @@ export default function BulkUpsertPage() {
       }
 
       // Batch validate all rows
-      const validationErrors = await validateRows(usersToValidate)
-      if (validationErrors.size > 0) {
-        const errors: ValidationError[] = Array.from(validationErrors.entries()).map(([index, rowErrors]) => ({
+      const { errors, companyMap, ownerMap, validOwnerEmails } = await validateRows(usersToValidate)
+      if (errors.size > 0) {
+        const validationErrors: ValidationError[] = Array.from(errors.entries()).map(([index, rowErrors]) => ({
           row: index + 1,
           user: `${usersToValidate[index].first_name || ''} ${usersToValidate[index].last_name || ''} (${usersToValidate[index].email || `Row ${index + 1}`})`.trim(),
           errors: rowErrors
         }))
-        setValidationErrors(errors)
+        setValidationErrors(validationErrors)
         return
       }
 
@@ -327,52 +340,6 @@ export default function BulkUpsertPage() {
       // Create a map of existing users by email for quick lookup
       const existingUserMap = new Map(
         existingUsers.map(user => [user.email.toLowerCase(), user])
-      )
-
-      // Create maps for companies and owners to avoid repeated lookups
-      const companyNames = new Set(usersToValidate.map(u => u.company_name).filter((name): name is string => name !== null))
-      const ownerEmails = new Set(usersToValidate.map(u => u.owner_email).filter((email): email is string => email !== null))
-
-      // Use API route to check and create companies
-      const companiesResponse = await fetch('/api/companies/check-and-create', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ 
-          companyNames: Array.from(companyNames),
-          organizationId: currentOrganizationId
-        })
-      })
-
-      if (!companiesResponse.ok) {
-        throw new Error('Failed to check and create companies')
-      }
-
-      const companies = (await companiesResponse.json()) as Array<{ id: string; name: string }>
-      const companyMap = new Map(
-        companies.map(company => [company.name, company.id])
-      )
-
-      // Use API route to check owners
-      const ownersResponse = await fetch('/api/users/check-owners', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ 
-          emails: Array.from(ownerEmails),
-          organizationId: currentOrganizationId
-        })
-      })
-
-      if (!ownersResponse.ok) {
-        throw new Error('Failed to check owners')
-      }
-
-      const owners = (await ownersResponse.json()) as Array<{ id: string; email: string }>
-      const ownerMap = new Map(
-        owners.map(owner => [owner.email.toLowerCase(), owner.id])
       )
 
       // Prepare users for update/insert
@@ -404,7 +371,7 @@ export default function BulkUpsertPage() {
 
         // Set owner_id if owner_email exists and was found
         if (userData.owner_email) {
-          const ownerId = ownerMap.get(userData.owner_email.toLowerCase())
+          const ownerId = validOwnerEmails.has(userData.owner_email) ? ownerMap.get(userData.owner_email.toLowerCase()) : null
           if (ownerId) {
             processedUser.owner_id = ownerId
           }
