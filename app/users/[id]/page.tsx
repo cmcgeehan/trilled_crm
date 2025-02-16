@@ -609,7 +609,6 @@ export default function CustomerDetailPage({ params }: { params: Promise<{ id: s
       // Create all follow-ups in the sequence
       const followUpsToCreate = sequenceDates.map((sequenceDate) => ({
         user_id: customer.id,
-        description: null,
         date: sequenceDate.toISOString(),
         completed: false,
         type: type

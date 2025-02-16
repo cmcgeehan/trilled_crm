@@ -22,7 +22,7 @@ type UserData = {
   id?: string;
   first_name: string;
   last_name: string;
-  email: string;
+  email?: string | null;
   phone?: string | null;
   position?: string | null;
   role: UserRole;
@@ -36,7 +36,7 @@ type UserData = {
 const FIELDS = [
   { name: 'first_name', description: 'First name (required)' },
   { name: 'last_name', description: 'Last name (required)' },
-  { name: 'email', description: 'Email address (required)' },
+  { name: 'email', description: 'Email address (optional)' },
   { name: 'phone', description: 'Phone number (optional)' },
   { name: 'company_name', description: 'Company name (optional) - will be matched against existing companies' },
   { name: 'position', description: 'Position at company (optional)' },
@@ -92,84 +92,104 @@ export default function BulkUpsertPage() {
     checkAccess()
   }, [router])
 
-  const validateRow = async (
-    data: Record<string, string | null>
-  ): Promise<string[]> => {
-    const errors: string[] = []
+  const validateRows = async (
+    rows: Record<string, string | null>[]
+  ): Promise<Map<number, string[]>> => {
+    const errors = new Map<number, string[]>()
     
-    // Required fields
-    if (!data.first_name) {
-      errors.push('First name is required')
-    }
-    if (!data.last_name) {
-      errors.push('Last name is required')
-    }
-    if (!data.email) {
-      errors.push('Email is required')
-    } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(data.email)) {
-      errors.push('Invalid email format')
+    // Collect all unique company names and owner emails for batch validation
+    const companyNames = new Set<string>()
+    const ownerEmails = new Set<string>()
+    
+    rows.forEach(data => {
+      if (data.company_name) companyNames.add(data.company_name)
+      if (data.owner_email) ownerEmails.add(data.owner_email)
+    })
+
+    // Use API route to check and create companies
+    const companiesResponse = await fetch('/api/companies/check-and-create', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ 
+        companyNames: Array.from(companyNames),
+        organizationId: currentOrganizationId
+      })
+    })
+
+    if (!companiesResponse.ok) {
+      throw new Error('Failed to check and create companies')
     }
 
-    // Validate role if provided
-    if (data.role) {
-      const role = data.role as string
-      // Check if trying to create/update admin or super_admin
-      if (role === 'admin' || role === 'super_admin') {
-        errors.push('Cannot create or update admin or super admin users through bulk upsert')
-      } else if (!VALID_ROLES.includes(role as UserRole)) {
-        errors.push(`Invalid role: ${role}. Must be one of: ${VALID_ROLES.join(', ')}`)
+    const companies = await companiesResponse.json() as Array<{ id: string; name: string }>
+    const existingCompanyNames = new Set(companies.map(c => c.name))
+
+    // Use API route to check owners
+    const ownersResponse = await fetch('/api/users/check-owners', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ 
+        emails: Array.from(ownerEmails),
+        organizationId: currentOrganizationId
+      })
+    })
+
+    if (!ownersResponse.ok) {
+      throw new Error('Failed to check owners')
+    }
+
+    const owners = await ownersResponse.json() as Array<{ id: string; email: string; role: string }>
+    const validOwnerEmails = new Set(owners.map(o => o.email))
+
+    // Validate each row
+    rows.forEach((data, index) => {
+      const rowErrors: string[] = []
+      
+      // Required fields
+      if (!data.first_name) {
+        rowErrors.push('First name is required')
       }
-    }
-
-    // Super admins can create users in any org, admins only in their org
-    if (currentUserRole === 'admin' && data.role === 'super_admin') {
-      errors.push('Admins cannot create super admin users')
-    }
-
-    // Validate company name if provided
-    if (data.company_name) {
-      let query = supabase
-        .from('companies')
-        .select('id')
-        .eq('name', data.company_name)
-        .is('deleted_at', null)
-
-      // If admin, restrict to their organization's companies
-      if (currentUserRole === 'admin' && currentOrganizationId) {
-        query = query.eq('organization_id', currentOrganizationId)
+      if (!data.last_name) {
+        rowErrors.push('Last name is required')
+      }
+      
+      // Validate email format if provided
+      if (data.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(data.email)) {
+        rowErrors.push('Invalid email format')
       }
 
-      const { data: company, error: companyError } = await query.single()
-
-      if (companyError || !company) {
-        errors.push(`Company not found: ${data.company_name}`)
-      }
-    }
-
-    // Validate owner email if provided
-    if (data.owner_email) {
-      let query = supabase
-        .from('users')
-        .select('id, role')
-        .eq('email', data.owner_email)
-        .in('role', ['agent', 'admin', 'super_admin'])
-
-      // If admin, restrict to their organization's users
-      if (currentUserRole === 'admin' && currentOrganizationId) {
-        query = query.eq('organization_id', currentOrganizationId)
+      // Validate role if provided
+      if (data.role) {
+        const role = data.role as string
+        if (role === 'admin' || role === 'super_admin') {
+          rowErrors.push('Cannot create or update admin or super admin users through bulk upsert')
+        } else if (!VALID_ROLES.includes(role as UserRole)) {
+          rowErrors.push(`Invalid role: ${role}. Must be one of: ${VALID_ROLES.join(', ')}`)
+        }
       }
 
-      const { data: owner, error: ownerError } = await query.single()
-
-      if (ownerError || !owner) {
-        errors.push(`Owner not found or not an agent/admin: ${data.owner_email}`)
+      // Super admins can create users in any org, admins only in their org
+      if (currentUserRole === 'admin' && data.role === 'super_admin') {
+        rowErrors.push('Admins cannot create super admin users')
       }
-    }
 
-    // Validate phone number format if provided
-    if (data.phone && !/^\+?[\d\s-()]+$/.test(data.phone)) {
-      errors.push('Invalid phone number format')
-    }
+      // Validate owner if provided
+      if (data.owner_email && !validOwnerEmails.has(data.owner_email)) {
+        rowErrors.push(`Owner not found or not an agent/admin: ${data.owner_email}`)
+      }
+
+      // Validate phone number format if provided
+      if (data.phone && !/^\+?[\d\s-()]+$/.test(data.phone)) {
+        rowErrors.push('Invalid phone number format')
+      }
+
+      if (rowErrors.length > 0) {
+        errors.set(index, rowErrors)
+      }
+    })
 
     return errors
   }
@@ -196,26 +216,63 @@ export default function BulkUpsertPage() {
     
     try {
       const text = await file.text()
-      const rows = text.split('\n')
-      const headers = rows[0].split(',').map(h => h.trim())
+      
+      // Split into lines, handling both \r\n and \n
+      const lines = text.split(/\r?\n/)
+      
+      // Parse CSV with proper quote handling
+      const parseCSVLine = (line: string): string[] => {
+        const result: string[] = []
+        let inQuotes = false
+        let currentValue = ''
+        
+        for (let i = 0; i < line.length; i++) {
+          const char = line[i]
+          
+          if (char === '"') {
+            if (inQuotes && line[i + 1] === '"') {
+              // Handle escaped quotes
+              currentValue += '"'
+              i++
+            } else {
+              // Toggle quotes mode
+              inQuotes = !inQuotes
+            }
+          } else if (char === ',' && !inQuotes) {
+            // End of field
+            result.push(currentValue.trim())
+            currentValue = ''
+          } else {
+            currentValue += char
+          }
+        }
+        
+        // Push the last field
+        result.push(currentValue.trim())
+        return result
+      }
+
+      const rows = lines.map(line => parseCSVLine(line))
+      const headers = rows[0]
       
       // Validate headers
-      const requiredFields = ['first_name', 'last_name', 'email']
+      const requiredFields = ['first_name', 'last_name']
       const missingFields = requiredFields.filter(field => !headers.includes(field))
       if (missingFields.length > 0) {
         throw new Error(`Missing required columns: ${missingFields.join(', ')}`)
       }
 
-      // Validate all rows first
-      const validationErrors: ValidationError[] = []
-      const usersToProcess: Record<string, string | null>[] = []
+      // Parse rows into objects
+      const usersToValidate: Record<string, string | null>[] = []
+      const columnErrors: ValidationError[] = []
 
       for (let i = 1; i < rows.length; i++) {
-        const row = rows[i].split(',').map(cell => cell.trim())
-        if (row.length === 0 || (row.length === 1 && !row[0])) continue // Skip empty rows
+        const row = rows[i]
+        // Skip empty rows or rows with all empty values
+        if (row.length === 0 || row.every(cell => !cell)) continue
         
         if (row.length !== headers.length) {
-          validationErrors.push({
+          columnErrors.push({
             row: i,
             user: row[headers.indexOf('email')] || `Row ${i}`,
             errors: [`Invalid number of columns. Expected ${headers.length}, got ${row.length}`]
@@ -227,98 +284,102 @@ export default function BulkUpsertPage() {
         headers.forEach((header, index) => {
           userData[header] = row[index] || null
         })
-
-        // Validate the row
-        const rowErrors = await validateRow(userData)
-        if (rowErrors.length > 0) {
-          validationErrors.push({
-            row: i,
-            user: `${userData.first_name || ''} ${userData.last_name || ''} (${userData.email || `Row ${i}`})`.trim(),
-            errors: rowErrors
-          })
-        } else {
-          usersToProcess.push(userData)
-        }
+        usersToValidate.push(userData)
       }
 
-      // Check for duplicate emails in the CSV
-      const emails = usersToProcess.map(u => u.email?.toLowerCase()).filter((email): email is string => email !== null && email !== undefined)
-      const duplicates = emails.filter((email, index) => 
-        emails.indexOf(email) !== index
-      )
-      if (duplicates.length > 0) {
-        validationErrors.push({
-          row: 0,
-          user: 'Multiple rows',
-          errors: [`Duplicate email addresses found: ${[...new Set(duplicates)].join(', ')}`]
-        })
+      // If there are column errors, stop here
+      if (columnErrors.length > 0) {
+        setValidationErrors(columnErrors)
+        return
       }
 
-      // If there are any validation errors, stop here
-      if (validationErrors.length > 0) {
-        setValidationErrors(validationErrors)
+      // Batch validate all rows
+      const validationErrors = await validateRows(usersToValidate)
+      if (validationErrors.size > 0) {
+        const errors: ValidationError[] = Array.from(validationErrors.entries()).map(([index, rowErrors]) => ({
+          row: index + 1,
+          user: `${usersToValidate[index].first_name || ''} ${usersToValidate[index].last_name || ''} (${usersToValidate[index].email || `Row ${index + 1}`})`.trim(),
+          errors: rowErrors
+        }))
+        setValidationErrors(errors)
         return
       }
 
       // Process all valid users
       // First, get all existing users in one query
-      const userEmails = usersToProcess.map(u => u.email?.toLowerCase()).filter((email): email is string => email !== null)
-      const { data: existingUsers, error: lookupError } = await supabase
-        .from('users')
-        .select('id, email')
-        .in('email', userEmails)
+      const userEmails = usersToValidate.map(u => u.email?.toLowerCase()).filter((email): email is string => email !== null)
+      
+      // Use API route to check existing users
+      const existingUsersResponse = await fetch('/api/users/check-existing', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ emails: userEmails })
+      })
 
-      if (lookupError) {
-        console.error('Error looking up users:', lookupError)
-        throw new Error(`Error looking up users: ${lookupError.message}`)
+      if (!existingUsersResponse.ok) {
+        throw new Error('Failed to check existing users')
       }
+
+      const existingUsers = (await existingUsersResponse.json()) as Array<{ id: string; email: string }>
 
       // Create a map of existing users by email for quick lookup
       const existingUserMap = new Map(
-        existingUsers?.map(user => [user.email.toLowerCase(), user]) || []
+        existingUsers.map(user => [user.email.toLowerCase(), user])
       )
 
       // Create maps for companies and owners to avoid repeated lookups
-      const companyNames = new Set(usersToProcess.map(u => u.company_name).filter((name): name is string => name !== null))
-      const ownerEmails = new Set(usersToProcess.map(u => u.owner_email).filter((email): email is string => email !== null))
+      const companyNames = new Set(usersToValidate.map(u => u.company_name).filter((name): name is string => name !== null))
+      const ownerEmails = new Set(usersToValidate.map(u => u.owner_email).filter((email): email is string => email !== null))
 
-      // Batch lookup companies
-      let companiesQuery = supabase
-        .from('companies')
-        .select('id, name')
-        .in('name', Array.from(companyNames))
-        .is('deleted_at', null)
+      // Use API route to check and create companies
+      const companiesResponse = await fetch('/api/companies/check-and-create', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ 
+          companyNames: Array.from(companyNames),
+          organizationId: currentOrganizationId
+        })
+      })
 
-      if (currentUserRole === 'admin' && currentOrganizationId) {
-        companiesQuery = companiesQuery.eq('organization_id', currentOrganizationId)
+      if (!companiesResponse.ok) {
+        throw new Error('Failed to check and create companies')
       }
 
-      const { data: companies } = await companiesQuery
+      const companies = (await companiesResponse.json()) as Array<{ id: string; name: string }>
       const companyMap = new Map(
-        companies?.map(company => [company.name, company.id]) || []
+        companies.map(company => [company.name, company.id])
       )
 
-      // Batch lookup owners
-      let ownersQuery = supabase
-        .from('users')
-        .select('id, email')
-        .in('email', Array.from(ownerEmails))
-        .in('role', ['agent', 'admin', 'super_admin'])
+      // Use API route to check owners
+      const ownersResponse = await fetch('/api/users/check-owners', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ 
+          emails: Array.from(ownerEmails),
+          organizationId: currentOrganizationId
+        })
+      })
 
-      if (currentUserRole === 'admin' && currentOrganizationId) {
-        ownersQuery = ownersQuery.eq('organization_id', currentOrganizationId)
+      if (!ownersResponse.ok) {
+        throw new Error('Failed to check owners')
       }
 
-      const { data: owners } = await ownersQuery
+      const owners = (await ownersResponse.json()) as Array<{ id: string; email: string }>
       const ownerMap = new Map(
-        owners?.map(owner => [owner.email.toLowerCase(), owner.id]) || []
+        owners.map(owner => [owner.email.toLowerCase(), owner.id])
       )
 
       // Prepare users for update/insert
       const usersToUpdate: UserData[] = []
       const usersToInsert: UserData[] = []
 
-      for (const userData of usersToProcess) {
+      for (const userData of usersToValidate) {
         if (!userData.email) continue
 
         const processedUser: UserData = {
@@ -363,56 +424,94 @@ export default function BulkUpsertPage() {
       // Process updates in batches of 50
       for (let i = 0; i < usersToUpdate.length; i += 50) {
         const batch = usersToUpdate.slice(i, i + 50)
-        const { error: updateError } = await supabase
-          .from('users')
-          .upsert(batch)
+        const updatePromises = batch.map(user => 
+          fetch('/api/users/update', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(user)
+          }).then(res => {
+            if (!res.ok) throw new Error('Failed to update user')
+            return res.json()
+          })
+        )
 
-        if (updateError) throw updateError
+        const updatedUsers = await Promise.all(updatePromises)
+
+        // Create follow-up sequences for updated leads and customers
+        for (const updatedUser of updatedUsers) {
+          if (['lead', 'customer'].includes(updatedUser.role)) {
+            const followUpDates = calculateFollowUpDates(new Date(), updatedUser.role as 'lead' | 'customer')
+            
+            // Create follow-ups via API route
+            await fetch('/api/users/follow-ups', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({
+                followUps: followUpDates.map(date => ({
+                  date: date.toISOString(),
+                  type: 'email',
+                  user_id: updatedUser.id,
+                  completed: false,
+                  next_follow_up_id: null
+                }))
+              })
+            }).then(res => {
+              if (!res.ok) throw new Error('Failed to create follow-ups')
+              return res.json()
+            })
+          }
+        }
       }
 
       // Process inserts in batches of 50
       for (let i = 0; i < usersToInsert.length; i += 50) {
         const batch = usersToInsert.slice(i, i + 50)
-        const { data: newUsers, error: insertError } = await supabase
-          .from('users')
-          .insert(batch)
-          .select('id, role')
+        const insertPromises = batch.map(user => 
+          fetch('/api/users/create', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              ...user,
+              created_at: new Date().toISOString()
+            })
+          }).then(res => {
+            if (!res.ok) throw new Error('Failed to create user')
+            return res.json()
+          })
+        )
 
-        if (insertError) throw insertError
+        const newUsers = await Promise.all(insertPromises)
 
         // Create follow-up sequences for new leads and customers
-        if (newUsers) {
-          for (const newUser of newUsers as { id: string; role: UserRole }[]) {
-            if (['lead', 'customer'].includes(newUser.role)) {
-              const followUpDates = calculateFollowUpDates(new Date(), newUser.role as 'lead' | 'customer')
-              
-              let previousFollowUpId: string | null = null
-              for (const date of followUpDates) {
-                const { data: followUp, error: followUpError } = await supabase
-                  .from('follow_ups')
-                  .insert({
-                    date: date.toISOString(),
-                    type: 'email',
-                    user_id: newUser.id,
-                    completed: false,
-                    next_follow_up_id: null
-                  })
-                  .select()
-                  .single()
-
-                if (followUpError) throw followUpError
-                if (!followUp) throw new Error('Failed to create follow-up')
-
-                if (previousFollowUpId) {
-                  await supabase
-                    .from('follow_ups')
-                    .update({ next_follow_up_id: followUp.id })
-                    .eq('id', previousFollowUpId)
-                }
-
-                previousFollowUpId = followUp.id
-              }
-            }
+        for (const newUser of newUsers) {
+          if (['lead', 'customer'].includes(newUser.role)) {
+            const followUpDates = calculateFollowUpDates(new Date(), newUser.role as 'lead' | 'customer')
+            
+            // Create follow-ups via API route
+            await fetch('/api/users/follow-ups', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({
+                followUps: followUpDates.map(date => ({
+                  date: date.toISOString(),
+                  type: 'email',
+                  user_id: newUser.id,
+                  completed: false,
+                  next_follow_up_id: null
+                }))
+              })
+            }).then(res => {
+              if (!res.ok) throw new Error('Failed to create follow-ups')
+              return res.json()
+            })
           }
         }
       }
