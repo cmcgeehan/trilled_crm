@@ -38,6 +38,7 @@ const STATUS_STYLES: Record<UserStatus, { bg: string, text: string }> = {
 
 export default function UsersPage() {
   const router = useRouter()
+  const [searchInput, setSearchInput] = useState("")
   const [searchTerm, setSearchTerm] = useState("")
   const [users, setUsers] = useState<User[]>([])
   const [loading, setLoading] = useState(true)
@@ -76,8 +77,14 @@ export default function UsersPage() {
         countQuery = countQuery.eq('status', statusFilter)
       }
 
-      if (ownerFilter !== 'all') {
+      if (ownerFilter === 'unassigned') {
+        countQuery = countQuery.is('owner_id', null)
+      } else if (ownerFilter !== 'all') {
         countQuery = countQuery.eq('owner_id', ownerFilter)
+      }
+
+      if (searchTerm) {
+        countQuery = countQuery.or(`first_name.ilike.%${searchTerm}%,last_name.ilike.%${searchTerm}%,email.ilike.%${searchTerm}%,phone.ilike.%${searchTerm}%`)
       }
 
       const { count, error: countError } = await countQuery
@@ -94,7 +101,7 @@ export default function UsersPage() {
         .from('users')
         .select(`
           *,
-          companies!inner (
+          companies (
             id,
             name
           )
@@ -115,8 +122,14 @@ export default function UsersPage() {
         query = query.eq('status', statusFilter)
       }
 
-      if (ownerFilter !== 'all') {
+      if (ownerFilter === 'unassigned') {
+        query = query.is('owner_id', null)
+      } else if (ownerFilter !== 'all') {
         query = query.eq('owner_id', ownerFilter)
+      }
+
+      if (searchTerm) {
+        query = query.or(`first_name.ilike.%${searchTerm}%,last_name.ilike.%${searchTerm}%,email.ilike.%${searchTerm}%,phone.ilike.%${searchTerm}%`)
       }
 
       const { data: users, error } = await query
@@ -129,7 +142,7 @@ export default function UsersPage() {
     } finally {
       setDataLoading(false)
     }
-  }, [sortField, sortOrder, currentOrganizationId, roleFilter, statusFilter, ownerFilter, currentPage, itemsPerPage])
+  }, [sortField, sortOrder, currentOrganizationId, roleFilter, statusFilter, ownerFilter, currentPage, itemsPerPage, searchTerm])
 
   const loadAgents = useCallback(async () => {
     try {
@@ -194,16 +207,13 @@ export default function UsersPage() {
     }
   }, [userContextLoaded, loadAgents, loadUsers])
 
-  const filteredUsers = users.filter(user => {
-    const searchLower = searchTerm.toLowerCase()
-    return (
-      (user.email?.toLowerCase().includes(searchLower) ?? false) ||
-      (user.phone?.toLowerCase().includes(searchLower) ?? false) ||
-      (user.first_name?.toLowerCase().includes(searchLower) ?? false) ||
-      (user.last_name?.toLowerCase().includes(searchLower) ?? false) ||
-      (user.companies?.name?.toLowerCase().includes(searchLower) ?? false)
-    )
-  })
+  // Reset pagination when search term changes
+  useEffect(() => {
+    setCurrentPage(1)
+  }, [searchTerm, roleFilter, statusFilter, ownerFilter])
+
+  // Remove client-side filtering since we're now doing it server-side
+  const filteredUsers = users
 
   const handleSort = (field: SortField) => {
     if (field === sortField) {
@@ -227,6 +237,7 @@ export default function UsersPage() {
     setRoleFilter(null)
     setStatusFilter(null)
     setOwnerFilter('all')
+    setSearchInput("")
     setSearchTerm("")
   }
 
@@ -234,6 +245,16 @@ export default function UsersPage() {
 
   const handlePageChange = (newPage: number) => {
     setCurrentPage(newPage)
+  }
+
+  const handleSearch = () => {
+    setSearchTerm(searchInput)
+  }
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter') {
+      handleSearch()
+    }
   }
 
   if (loading || dataLoading || !userContextLoaded) {
@@ -280,12 +301,21 @@ export default function UsersPage() {
           <p className="text-xs text-muted-foreground mb-1">Search</p>
           <div className="relative max-w-sm">
             <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
-            <Input
-              placeholder="Search users..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="pl-10 text-base"
-            />
+            <div className="flex gap-2">
+              <Input
+                placeholder="Search users..."
+                value={searchInput}
+                onChange={(e) => setSearchInput(e.target.value)}
+                onKeyDown={handleKeyDown}
+                className="pl-10 text-base"
+              />
+              <Button 
+                onClick={handleSearch}
+                variant="secondary"
+              >
+                Search
+              </Button>
+            </div>
           </div>
         </div>
 
@@ -297,6 +327,7 @@ export default function UsersPage() {
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All Owners</SelectItem>
+              <SelectItem value="unassigned">Unassigned</SelectItem>
               {agents.map((agent) => (
                 <SelectItem key={agent.id} value={agent.id}>
                   {agent.first_name || agent.email || `Agent ${agent.id}`}

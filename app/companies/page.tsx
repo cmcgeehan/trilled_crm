@@ -59,6 +59,7 @@ type SortOrder = 'asc' | 'desc'
 
 export default function CompaniesPage() {
   const router = useRouter()
+  const [searchInput, setSearchInput] = useState("")
   const [searchTerm, setSearchTerm] = useState("")
   const [companies, setCompanies] = useState<Company[]>([])
   const [loading, setLoading] = useState(true)
@@ -100,6 +101,10 @@ export default function CompaniesPage() {
         countQuery = countQuery.eq('neighborhood', neighborhoodFilter)
       }
 
+      if (searchTerm) {
+        countQuery = countQuery.or(`name.ilike.%${searchTerm}%,type.ilike.%${searchTerm}%,street_address.ilike.%${searchTerm}%,city.ilike.%${searchTerm}%`)
+      }
+
       const { count, error: countError } = await countQuery
 
       if (countError) {
@@ -127,6 +132,10 @@ export default function CompaniesPage() {
         query = query.eq('neighborhood', neighborhoodFilter)
       }
 
+      if (searchTerm) {
+        query = query.or(`name.ilike.%${searchTerm}%,type.ilike.%${searchTerm}%,street_address.ilike.%${searchTerm}%,city.ilike.%${searchTerm}%`)
+      }
+
       query = query
         .order(sortField, { ascending: sortOrder === 'asc' })
         .range((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage - 1)
@@ -144,7 +153,7 @@ export default function CompaniesPage() {
     } finally {
       setDataLoading(false)
     }
-  }, [currentUserRole, currentOrganizationId, typeFilter, sortField, sortOrder, currentPage, itemsPerPage, neighborhoodFilter])
+  }, [currentUserRole, currentOrganizationId, typeFilter, sortField, sortOrder, currentPage, itemsPerPage, neighborhoodFilter, searchTerm])
 
   useEffect(() => {
     const checkSession = async () => {
@@ -193,15 +202,13 @@ export default function CompaniesPage() {
     }
   }, [userContextLoaded, loadCompanies])
 
-  const filteredCompanies = companies.filter(company => {
-    const searchLower = searchTerm.toLowerCase()
-    return (
-      (company.name?.toLowerCase().includes(searchLower) ?? false) ||
-      (company.type?.toLowerCase().includes(searchLower) ?? false) ||
-      (company.street_address?.toLowerCase().includes(searchLower) ?? false) ||
-      (company.city?.toLowerCase().includes(searchLower) ?? false)
-    )
-  })
+  // Reset pagination when search term changes
+  useEffect(() => {
+    setCurrentPage(1)
+  }, [searchTerm, typeFilter, neighborhoodFilter])
+
+  // Remove client-side filtering since we're now doing it server-side
+  const filteredCompanies = companies
 
   const handleSort = (field: SortField) => {
     if (field === sortField) {
@@ -217,9 +224,20 @@ export default function CompaniesPage() {
     return sortOrder === 'asc' ? '↑' : '↓'
   }
 
+  const handleSearch = () => {
+    setSearchTerm(searchInput)
+  }
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter') {
+      handleSearch()
+    }
+  }
+
   const handleClearFilters = () => {
     setTypeFilter(null)
     setNeighborhoodFilter(null)
+    setSearchInput("")
     setSearchTerm("")
   }
 
@@ -267,12 +285,21 @@ export default function CompaniesPage() {
       <div className="flex flex-col gap-4 md:flex-row md:items-center mb-6">
         <div className="flex-1 relative">
           <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
-          <Input
-            placeholder="Search companies..."
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            className="pl-8"
-          />
+          <div className="flex gap-2">
+            <Input
+              placeholder="Search companies..."
+              value={searchInput}
+              onChange={(e) => setSearchInput(e.target.value)}
+              onKeyDown={handleKeyDown}
+              className="pl-8"
+            />
+            <Button 
+              onClick={handleSearch}
+              variant="secondary"
+            >
+              Search
+            </Button>
+          </div>
         </div>
         <Select
           value={typeFilter || "all"}
