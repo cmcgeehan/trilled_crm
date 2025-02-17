@@ -6,7 +6,8 @@ export async function POST(request: Request) {
   try {
     const { companyNames, organizationId } = await request.json()
     
-    const supabase = createRouteHandlerClient({ cookies })
+    const cookieStore = cookies()
+    const supabase = createRouteHandlerClient({ cookies: () => cookieStore })
     
     // Verify user is authenticated and has appropriate role
     const { data: { session } } = await supabase.auth.getSession()
@@ -28,14 +29,20 @@ export async function POST(request: Request) {
     let companiesQuery = supabase
       .from('companies')
       .select('id, name')
-      .in('name', companyNames)
+      .or(companyNames.map((name: string) => `name.ilike.%${name}%`).join(','))
       .is('deleted_at', null)
+
+    console.log('API: Company search query:', {
+      companyNames,
+      query: companyNames.map((name: string) => `name.ilike.%${name}%`).join(',')
+    })
 
     if (currentUser.role === 'admin' && organizationId) {
       companiesQuery = companiesQuery.eq('organization_id', organizationId)
     }
 
     const { data: existingCompanies, error: fetchError } = await companiesQuery
+    console.log('API: Found existing companies:', existingCompanies)
     if (fetchError) {
       console.error('Error fetching companies:', fetchError)
       return new NextResponse('Internal Server Error', { status: 500 })

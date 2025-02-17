@@ -6,7 +6,8 @@ export async function POST(request: Request) {
   try {
     const { emails, organizationId } = await request.json()
     
-    const supabase = createRouteHandlerClient({ cookies })
+    const cookieStore = cookies()
+    const supabase = createRouteHandlerClient({ cookies: () => cookieStore })
     
     // Verify user is authenticated and has appropriate role
     const { data: { session } } = await supabase.auth.getSession()

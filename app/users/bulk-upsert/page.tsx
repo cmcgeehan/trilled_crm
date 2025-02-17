@@ -109,7 +109,7 @@ export default function BulkUpsertPage() {
     const ownerEmails = new Set<string>()
     
     rows.forEach(data => {
-      if (data.company_name) companyNames.add(data.company_name)
+      if (data.company_name) companyNames.add(data.company_name.trim())
       if (data.owner_email) ownerEmails.add(data.owner_email)
     })
 
@@ -130,7 +130,22 @@ export default function BulkUpsertPage() {
     }
 
     const companies = await companiesResponse.json() as Array<{ id: string; name: string }>
-    const companyMap = new Map(companies.map(company => [company.name, company.id]))
+    console.log('Companies from API:', companies)
+    const companyMap = new Map(companies.map(company => [company.name.toLowerCase().trim(), company.id]))
+    console.log('Company map entries:', Array.from(companyMap.entries()))
+
+    // Log company mapping process
+    rows.forEach((data, index) => {
+      if (data.company_name) {
+        console.log('Processing company mapping:', {
+          rowIndex: index,
+          originalCompanyName: data.company_name,
+          normalizedCompanyName: data.company_name.toLowerCase().trim(),
+          foundInMap: companyMap.has(data.company_name.toLowerCase().trim()),
+          mappedId: companyMap.get(data.company_name.toLowerCase().trim())
+        })
+      }
+    })
 
     // Use API route to check owners
     const ownersResponse = await fetch('/api/users/check-owners', {
@@ -318,6 +333,8 @@ export default function BulkUpsertPage() {
         return
       }
 
+      console.log('Parsed users to validate:', usersToValidate)
+
       // Process all valid users
       // First, get all existing users in one query
       const userEmails = usersToValidate.map(u => u.email?.toLowerCase()).filter((email): email is string => email !== null)
@@ -363,9 +380,17 @@ export default function BulkUpsertPage() {
 
         // Set company_id if company_name exists and was found
         if (userData.company_name) {
-          const companyId = companyMap.get(userData.company_name)
+          const normalizedCompanyName = userData.company_name.toLowerCase().trim()
+          console.log('Looking up company:', {
+            original: userData.company_name,
+            normalized: normalizedCompanyName,
+            found: companyMap.get(normalizedCompanyName)
+          })
+          const companyId = companyMap.get(normalizedCompanyName)
           if (companyId) {
             processedUser.company_id = companyId
+          } else {
+            console.log('Company not found in map')
           }
         }
 
@@ -387,6 +412,12 @@ export default function BulkUpsertPage() {
           usersToInsert.push(processedUser)
         }
       }
+
+      console.log('Validation results:', {
+        errors: Array.from(errors.entries()),
+        companyMapSize: companyMap.size,
+        ownerMapSize: ownerMap.size
+      })
 
       // Process updates in batches of 50
       for (let i = 0; i < usersToUpdate.length; i += 50) {
@@ -434,11 +465,23 @@ export default function BulkUpsertPage() {
         }
       }
 
+      console.log('Users to process:', {
+        toUpdate: usersToUpdate,
+        toInsert: usersToInsert
+      })
+
       // Process inserts in batches of 50
       for (let i = 0; i < usersToInsert.length; i += 50) {
         const batch = usersToInsert.slice(i, i + 50)
-        const insertPromises = batch.map(user => 
-          fetch('/api/users/create', {
+        console.log('Processing insert batch:', batch)
+        const insertPromises = batch.map(user => {
+          console.log('Preparing to create user:', {
+            userData: user,
+            hasCompanyId: !!user.company_id,
+            hasOwnerId: !!user.owner_id,
+            hasOrgId: !!user.organization_id
+          })
+          return fetch('/api/users/create', {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
@@ -447,46 +490,60 @@ export default function BulkUpsertPage() {
               ...user,
               created_at: new Date().toISOString()
             })
-          }).then(res => {
-            if (!res.ok) throw new Error('Failed to create user')
+          }).then(async res => {
+            if (!res.ok) {
+              const errorText = await res.text()
+              console.error('Create user error:', {
+                status: res.status,
+                statusText: res.statusText,
+                errorText
+              })
+              throw new Error(`Failed to create user: ${errorText}`)
+            }
             return res.json()
           })
-        )
+        })
 
-        const newUsers = await Promise.all(insertPromises)
+        try {
+          const newUsers = await Promise.all(insertPromises)
+          console.log('Created users:', newUsers)
 
-        // Create follow-up sequences for new leads and customers
-        for (const newUser of newUsers) {
-          if (['lead', 'customer'].includes(newUser.role)) {
-            const followUpDates = calculateFollowUpDates(new Date(), newUser.role as 'lead' | 'customer')
-            
-            // Create follow-ups via API route
-            await fetch('/api/users/follow-ups', {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-              },
-              body: JSON.stringify({
-                followUps: followUpDates.map(date => ({
-                  date: date.toISOString(),
-                  type: 'email',
-                  user_id: newUser.id,
-                  completed: false,
-                  next_follow_up_id: null
-                }))
+          // Create follow-up sequences for new leads and customers
+          for (const newUser of newUsers) {
+            if (['lead', 'customer'].includes(newUser.role)) {
+              const followUpDates = calculateFollowUpDates(new Date(), newUser.role as 'lead' | 'customer')
+              
+              // Create follow-ups via API route
+              await fetch('/api/users/follow-ups', {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                  followUps: followUpDates.map(date => ({
+                    date: date.toISOString(),
+                    type: 'email',
+                    user_id: newUser.id,
+                    completed: false,
+                    next_follow_up_id: null
+                  }))
+                })
+              }).then(res => {
+                if (!res.ok) throw new Error('Failed to create follow-ups')
+                return res.json()
               })
-            }).then(res => {
-              if (!res.ok) throw new Error('Failed to create follow-ups')
-              return res.json()
-            })
+            }
           }
+
+          setSuccess(true)
+          setTimeout(() => {
+            router.push('/users')
+          }, 2000)
+        } catch (err) {
+          console.error('Error processing insert batch:', err)
+          setError(err instanceof Error ? err.message : 'Error processing insert batch')
         }
       }
-
-      setSuccess(true)
-      setTimeout(() => {
-        router.push('/users')
-      }, 2000)
     } catch (err) {
       console.error('Error processing CSV:', err)
       setError(err instanceof Error ? err.message : 'Error processing CSV file')

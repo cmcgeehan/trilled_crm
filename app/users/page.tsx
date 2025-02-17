@@ -17,7 +17,10 @@ import { toast } from "react-hot-toast"
 
 type User = Omit<Database['public']['Tables']['users']['Row'], 'status'> & {
   status: UserStatus,
-  company_name?: string | null
+  companies?: {
+    id: string;
+    name: string;
+  } | null
 }
 
 type UserRole = 'lead' | 'customer' | 'agent' | 'admin' | 'super_admin'
@@ -89,7 +92,13 @@ export default function UsersPage() {
       // Then get paginated data
       let query = supabase
         .from('users')
-        .select('*')
+        .select(`
+          *,
+          companies!inner (
+            id,
+            name
+          )
+        `)
         .is('deleted_at', null)
         .order(sortField, { ascending: sortOrder === 'asc' })
         .range((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage - 1)
@@ -192,7 +201,7 @@ export default function UsersPage() {
       (user.phone?.toLowerCase().includes(searchLower) ?? false) ||
       (user.first_name?.toLowerCase().includes(searchLower) ?? false) ||
       (user.last_name?.toLowerCase().includes(searchLower) ?? false) ||
-      (user.company_name?.toLowerCase().includes(searchLower) ?? false)
+      (user.companies?.name?.toLowerCase().includes(searchLower) ?? false)
     )
   })
 
@@ -412,7 +421,7 @@ export default function UsersPage() {
                   <TableCell className="py-2 text-sm">{user.email || <span className="text-gray-400">No email</span>}</TableCell>
                   <TableCell className="py-2 text-sm">{user.phone || <span className="text-gray-400">No phone</span>}</TableCell>
                   <TableCell className="py-2 text-sm">{user.position || <span className="text-gray-400">No position</span>}</TableCell>
-                  <TableCell className="py-2 text-sm">{user.company_name || <span className="text-gray-400">No company</span>}</TableCell>
+                  <TableCell className="py-2 text-sm">{user.companies?.name || <span className="text-gray-400">No company</span>}</TableCell>
                   <TableCell className="py-2">
                     <div 
                       className={cn(

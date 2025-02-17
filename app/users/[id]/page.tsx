@@ -246,6 +246,7 @@ export default function CustomerDetailPage({ params }: { params: Promise<{ id: s
         .select(`
           *,
           companies (
+            id,
             name
           )
         `)
