@@ -24,6 +24,7 @@ type Company = Database['public']['Tables']['companies']['Row'] & {
   country?: string | null;
   status?: string;
   type: CompanyType;
+  notes?: string | null;
 }
 
 type CompanyType = 
@@ -175,6 +176,7 @@ export default function CompanyDetailsPage({ params }: { params: Promise<{ id: s
           state: editedCompany.state,
           postal_code: editedCompany.postal_code,
           country: editedCompany.country,
+          notes: editedCompany.notes,
         })
         .eq('id', id)
 
@@ -415,6 +417,17 @@ export default function CompanyDetailsPage({ params }: { params: Promise<{ id: s
                     value={editedCompany.country || ''}
                     onChange={(e) => setEditedCompany(prev => ({ ...prev!, country: e.target.value }))}
                     className="mt-1"
+                    disabled={!canEdit()}
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="notes">Notes</Label>
+                  <textarea
+                    id="notes"
+                    value={editedCompany.notes || ''}
+                    onChange={(e) => setEditedCompany(prev => ({ ...prev!, notes: e.target.value }))}
+                    className="flex min-h-[80px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                    placeholder="Add notes about this company..."
                     disabled={!canEdit()}
                   />
                 </div>

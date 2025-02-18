@@ -13,7 +13,11 @@ type UserStatus = 'needs_response' | 'new' | 'follow_up' | 'won' | 'lost'
 
 type User = Omit<Database['public']['Tables']['users']['Row'], 'status'> & {
   status: UserStatus
-  company?: string // Adding company as an optional field
+  position?: string | null
+  companies?: {
+    id: string
+    name: string
+  } | null
 }
 
 const ACTIVE_STATUSES = ['needs_response', 'new', 'follow_up'] as const
@@ -130,7 +134,13 @@ export default function DashboardPage() {
 
     const { data, error } = await supabase
       .from('users')
-      .select()
+      .select(`
+        *,
+        companies (
+          id,
+          name
+        )
+      `)
       .eq('role', 'lead')
       .eq('owner_id', session.user.id)
       .in('status', ACTIVE_STATUSES)
@@ -146,8 +156,7 @@ export default function DashboardPage() {
     // Sort leads by status priority and ensure correct typing
     const sortedLeads = [...(data || [])].map(lead => ({
       ...lead,
-      status: lead.status as UserStatus,
-      company: lead.company || undefined
+      status: lead.status as UserStatus
     })).sort((a, b) => {
       return STATUS_PRIORITY[a.status as UserStatus] - STATUS_PRIORITY[b.status as UserStatus]
     })
@@ -215,9 +224,21 @@ export default function DashboardPage() {
               <CardContent className="flex justify-between items-center p-4">
                 <div>
                   <p className="font-semibold text-brand-darkBlue">{lead.first_name} {lead.last_name}</p>
-                  {lead.company && (
-                    <p className="text-sm text-brand-darkBlue/70">{lead.company}</p>
-                  )}
+                  <p className="text-sm text-brand-darkBlue/70">
+                    {lead.companies?.name ? (
+                      <>
+                        {lead.companies.name}
+                        {lead.position && (
+                          <>
+                            <span className="mx-1">·</span>
+                            <span>{lead.position}</span>
+                          </>
+                        )}
+                      </>
+                    ) : lead.position ? (
+                      <span>{lead.position}</span>
+                    ) : null}
+                  </p>
                 </div>
                 <div className="flex items-center space-x-2">
                   <div 

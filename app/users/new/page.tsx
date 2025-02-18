@@ -172,37 +172,7 @@ export default function NewUserPage() {
         throw new Error(error.error || 'Failed to create user')
       }
 
-      // Create follow-ups for leads and customers
-      if (formData.role === 'lead' || formData.role === 'customer') {
-        // Calculate follow-up dates
-        const followUpDates = calculateFollowUpDates(new Date(), formData.role)
-        
-        // Create all follow-ups in a single batch to minimize delay
-        const followUpsToCreate = followUpDates.map(date => ({
-          date: date.toISOString(),
-          type: 'email',
-          user_id: userId,
-          completed: false,
-          next_follow_up_id: null
-        }))
-
-        // Create follow-ups via API route
-        const followUpResponse = await fetch('/api/users/follow-ups', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            followUps: followUpsToCreate
-          })
-        })
-
-        if (!followUpResponse.ok) {
-          const error = await followUpResponse.json()
-          throw new Error(error.error || 'Failed to create follow-ups')
-        }
-      }
-
+      // Follow-ups are now created by the API, so we can just redirect
       router.push('/users')
       router.refresh()
     } catch (err) {
@@ -211,23 +181,6 @@ export default function NewUserPage() {
     } finally {
       setLoading(false)
     }
-  }
-
-  // Helper function to calculate follow-up dates based on role
-  const calculateFollowUpDates = (createdDate: Date, role: 'lead' | 'customer') => {
-    const dates = []
-    const day = 24 * 60 * 60 * 1000 // milliseconds in a day
-
-    // Different intervals based on role
-    const intervals = role === 'lead'
-      ? [1, 2, 4, 7, 10, 14, 28] // Lead follow-up sequence
-      : [14, 28, 42, 56, 70, 90, 120, 150, 180] // Customer follow-up sequence
-
-    for (const interval of intervals) {
-      dates.push(new Date(createdDate.getTime() + interval * day))
-    }
-    
-    return dates
   }
 
   if (!currentUserRole || !['admin', 'super_admin'].includes(currentUserRole)) {
