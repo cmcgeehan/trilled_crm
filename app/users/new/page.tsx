@@ -132,14 +132,15 @@ export default function NewUserPage() {
           })
         })
 
+        const responseData = await response.json()
         if (!response.ok) {
-          const error = await response.json()
-          throw new Error(error.error || 'Failed to invite user')
+          throw new Error(responseData.error || 'Failed to invite user')
         }
 
-        const { user: authData } = await response.json()
-        if (!authData) throw new Error('Failed to create auth user')
-        userId = authData.id
+        if (!responseData.user) {
+          throw new Error('Failed to create auth user')
+        }
+        userId = responseData.user.id
       } else {
         // For leads and customers, generate a UUID
         userId = crypto.randomUUID()

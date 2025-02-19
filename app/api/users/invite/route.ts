@@ -28,6 +28,18 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Email is required' }, { status: 400 })
     }
 
+    // First try to get the user by listing users and filtering
+    const { data: users, error: listError } = await adminClient.auth.admin.listUsers()
+    const existingUser = users?.users.find(u => u.email?.toLowerCase() === email.toLowerCase())
+    
+    if (existingUser) {
+      console.log('Found existing user:', existingUser)
+      return NextResponse.json({ user: existingUser })
+    }
+
+    // If user doesn't exist, create them
+    console.log('Creating new user with email:', email)
+    
     // Generate initial password as concatenation of user data
     const initialPassword = `${userData.first_name.toLowerCase()}${userData.last_name.toLowerCase()}${email.toLowerCase()}${(userData.role || 'agent').toLowerCase()}`
 
@@ -40,6 +52,16 @@ export async function POST(request: Request) {
     })
 
     if (error) {
+      // If we get an email_exists error, try to get the user one more time
+      if (error.status === 422 && error.message.includes('already been registered')) {
+        const { data: retryUsers, error: retryError } = await adminClient.auth.admin.listUsers()
+        const retryUser = retryUsers?.users.find(u => u.email?.toLowerCase() === email.toLowerCase())
+        if (retryUser) {
+          console.log('Found user on retry:', retryUser)
+          return NextResponse.json({ user: retryUser })
+        }
+      }
+      
       console.error('User creation error:', error)
       return NextResponse.json({ error: error.message }, { status: 400 })
     }
@@ -48,9 +70,10 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Failed to create user' }, { status: 400 })
     }
 
+    console.log('Successfully created new user:', data.user)
     return NextResponse.json({ user: data.user })
   } catch (error) {
-    console.error('Error creating user:', error)
+    console.error('Error in invite route:', error)
     return NextResponse.json(
       { error: 'Failed to create user' },
       { status: 500 }

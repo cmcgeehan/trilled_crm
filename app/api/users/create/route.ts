@@ -22,7 +22,8 @@ export async function POST(request: Request) {
     console.log('API: Received user data:', userData)
     
     // Use the normal client to check authentication and get the user's session
-    const supabase = createRouteHandlerClient({ cookies })
+    const cookieStore = cookies()
+    const supabase = createRouteHandlerClient({ cookies: () => cookieStore })
     
     // Verify user is authenticated and has appropriate role
     const { data: { session } } = await supabase.auth.getSession()
@@ -60,6 +61,7 @@ export async function POST(request: Request) {
     }
 
     const insertData = {
+      id: userData.id,
       first_name: userData.first_name,
       last_name: userData.last_name,
       email: userData.email,
