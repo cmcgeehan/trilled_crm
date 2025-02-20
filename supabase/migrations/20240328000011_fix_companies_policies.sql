@@ -35,7 +35,7 @@ CREATE POLICY "companies_insert" ON companies
             AND (
                 users.role = 'super_admin'
                 OR (
-                    users.role = 'admin'
+                    users.role IN ('admin', 'agent')
                     AND users.organization_id = organization_id
                 )
             )

@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useCallback } from "react"
+import { useState, useEffect, useCallback, useMemo } from "react"
 import Link from "next/link"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
@@ -83,71 +83,31 @@ export default function CompaniesPage() {
         organizationId: currentOrganizationId
       })
 
-      // First get total count
-      let countQuery = supabase
-        .from('companies')
-        .select('*', { count: 'exact', head: true })
-        .is('deleted_at', null)
+      const { data, error } = await supabase.rpc('get_companies_with_count', {
+        p_organization_id: currentOrganizationId,
+        p_type: typeFilter,
+        p_neighborhood: neighborhoodFilter,
+        p_search: searchTerm || null,
+        p_limit: itemsPerPage,
+        p_offset: (currentPage - 1) * itemsPerPage,
+        p_sort_field: sortField,
+        p_sort_order: sortOrder
+      })
 
-      if (currentOrganizationId) {
-        countQuery = countQuery.eq('organization_id', currentOrganizationId)
-      }
-
-      if (typeFilter) {
-        countQuery = countQuery.eq('type', typeFilter)
-      }
-
-      if (neighborhoodFilter) {
-        countQuery = countQuery.eq('neighborhood', neighborhoodFilter)
-      }
-
-      if (searchTerm) {
-        countQuery = countQuery.or(`name.ilike.%${searchTerm}%,type.ilike.%${searchTerm}%,street_address.ilike.%${searchTerm}%,city.ilike.%${searchTerm}%`)
-      }
-
-      const { count, error: countError } = await countQuery
-
-      if (countError) {
-        console.error('Error getting count:', countError)
-        return
-      }
-
-      setTotalCount(count || 0)
-
-      // Then get paginated data
-      let query = supabase
-        .from('companies')
-        .select('*')
-        .is('deleted_at', null)
-
-      if (currentOrganizationId) {
-        query = query.eq('organization_id', currentOrganizationId)
-      }
-
-      if (typeFilter) {
-        query = query.eq('type', typeFilter)
-      }
-
-      if (neighborhoodFilter) {
-        query = query.eq('neighborhood', neighborhoodFilter)
-      }
-
-      if (searchTerm) {
-        query = query.or(`name.ilike.%${searchTerm}%,type.ilike.%${searchTerm}%,street_address.ilike.%${searchTerm}%,city.ilike.%${searchTerm}%`)
-      }
-
-      query = query
-        .order(sortField, { ascending: sortOrder === 'asc' })
-        .range((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage - 1)
-      
-      const { data, error } = await query
-      
       if (error) {
         console.error('Error loading companies:', error)
         return
       }
-      
-      setCompanies(data || [])
+
+      if (!data || !Array.isArray(data) || data.length === 0) {
+        setTotalCount(0)
+        setCompanies([])
+        return
+      }
+
+      const { companies, total_count } = data[0]
+      setTotalCount(total_count || 0)
+      setCompanies(companies || [])
     } catch (err) {
       console.error('Error loading companies:', err)
     } finally {
@@ -247,6 +207,11 @@ export default function CompaniesPage() {
     setCurrentPage(newPage)
   }
 
+  // Optimize neighborhood filter loading
+  const uniqueNeighborhoods = useMemo(() => 
+    Array.from(new Set(companies.map(c => c.neighborhood).filter(Boolean))).sort()
+  , [companies])
+
   if (loading || dataLoading) {
     return (
       <div className="flex items-center justify-center min-h-screen">
@@ -274,11 +239,13 @@ export default function CompaniesPage() {
               <Link href="/companies/bulk-upsert">Bulk Upsert</Link>
             </Button>
           )}
-          <Button asChild>
-            <Link href="/companies/new">
-              <Plus className="mr-2 h-4 w-4" /> Add Company
-            </Link>
-          </Button>
+          {currentUserRole && ['admin', 'super_admin', 'agent'].includes(currentUserRole) && (
+            <Button asChild>
+              <Link href="/companies/new">
+                <Plus className="mr-2 h-4 w-4" /> Add Company
+              </Link>
+            </Button>
+          )}
         </div>
       </div>
 
@@ -352,7 +319,7 @@ export default function CompaniesPage() {
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">All Neighborhoods</SelectItem>
-            {Array.from(new Set(companies.map(c => c.neighborhood).filter(Boolean))).sort().map(neighborhood => (
+            {uniqueNeighborhoods.map(neighborhood => (
               <SelectItem key={neighborhood!} value={neighborhood!}>{neighborhood}</SelectItem>
             ))}
           </SelectContent>

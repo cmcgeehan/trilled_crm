@@ -68,7 +68,7 @@ export default function NewCompanyPage() {
   }, [router])
 
   const canCreate = () => {
-    return ['admin', 'super_admin'].includes(currentUserRole || '')
+    return ['admin', 'super_admin', 'agent'].includes(currentUserRole || '')
   }
 
   const handleCreateCompany = async () => {
