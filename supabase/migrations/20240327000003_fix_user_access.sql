@@ -23,12 +23,20 @@ DROP TABLE IF EXISTS user_access_cache;
 DROP FUNCTION IF EXISTS sync_user_access_cache();
 DROP FUNCTION IF EXISTS refresh_user_roles();
 
+-- Create or ensure user_role type exists
+DO $$ BEGIN
+    CREATE TYPE user_role AS ENUM ('super_admin', 'admin', 'agent', 'lead', 'customer');
+EXCEPTION
+    WHEN duplicate_object THEN null;
+END $$;
+
 -- Create a new secure function to check user role and access
 CREATE OR REPLACE FUNCTION check_user_access(check_user_id uuid)
 RETURNS TABLE (
     is_self boolean,
     is_super_admin boolean,
     is_admin boolean,
+    is_agent boolean,
     organization_id uuid
 ) SECURITY DEFINER
 SET search_path = public
@@ -40,6 +48,7 @@ BEGIN
         check_user_id = auth.uid(),
         role = 'super_admin'::user_role,
         role = 'admin'::user_role,
+        role = 'agent'::user_role,
         u.organization_id
     FROM users u
     WHERE u.id = auth.uid()
@@ -83,6 +92,30 @@ CREATE POLICY "users_update_policy" ON users
                 access.is_self 
                 OR access.is_super_admin 
                 OR (access.is_admin AND access.organization_id = users.organization_id)
+        )
+    );
+
+CREATE POLICY "users_insert_policy" ON users
+    FOR INSERT
+    TO authenticated
+    WITH CHECK (
+        EXISTS (
+            SELECT 1
+            FROM check_user_access(auth.uid()) access
+            WHERE (
+                -- Super admins can create any role
+                access.is_super_admin
+                OR
+                -- Admins can create agents, leads, and customers
+                (access.is_admin 
+                 AND role IN ('agent', 'lead', 'customer')
+                 AND access.organization_id = organization_id)
+                OR
+                -- Agents can only create leads and customers
+                (access.is_agent
+                 AND role IN ('lead', 'customer')
+                 AND access.organization_id = organization_id)
+            )
         )
     );
 

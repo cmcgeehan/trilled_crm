@@ -187,16 +187,24 @@ export default function BulkUpsertPage() {
       // Validate role if provided
       if (data.role) {
         const role = data.role as string
-        if (role === 'admin' || role === 'super_admin') {
-          rowErrors.push('Cannot create or update admin or super admin users through bulk upsert')
+        if (role === 'super_admin') {
+          rowErrors.push('Cannot create super admin users through bulk upsert')
+        } else if (role === 'admin') {
+          if (currentUserRole !== 'super_admin') {
+            rowErrors.push('Only super admins can create admin users')
+          }
+        } else if (role === 'agent') {
+          if (!['super_admin', 'admin'].includes(currentUserRole || '')) {
+            rowErrors.push('Only super admins and admins can create agent users')
+          }
         } else if (!VALID_ROLES.includes(role as UserRole)) {
           rowErrors.push(`Invalid role: ${role}. Must be one of: ${VALID_ROLES.join(', ')}`)
         }
       }
 
-      // Super admins can create users in any org, admins only in their org
-      if (currentUserRole === 'admin' && data.role === 'super_admin') {
-        rowErrors.push('Admins cannot create super admin users')
+      // Validate organization access
+      if (currentUserRole !== 'super_admin' && data.organization_id !== currentOrganizationId) {
+        rowErrors.push('Cannot create users in different organizations')
       }
 
       // Validate owner if provided

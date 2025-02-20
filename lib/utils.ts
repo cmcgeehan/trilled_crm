@@ -13,13 +13,28 @@ export const calculateFollowUpDates = (createdDate: Date, role: 'lead' | 'custom
   // Different intervals based on role
   const intervals = role === 'lead' 
     ? [1, 2, 4, 7, 10, 14, 28] // Lead follow-up sequence
-    : [14, 28, 42, 56, 70, 90, 120, 150, 180] // Customer follow-up sequence
+    : [7] // Customer weekly sequence (just one interval that will be used repeatedly)
 
-  for (const interval of intervals) {
-    dates.push(new Date(createdDate.getTime() + interval * day))
+  // For leads, create the fixed sequence
+  if (role === 'lead') {
+    for (const interval of intervals) {
+      dates.push(new Date(createdDate.getTime() + interval * day))
+    }
+  } else {
+    // For customers, create 4 weekly follow-ups (the cron job will create more as needed)
+    for (let i = 1; i <= 4; i++) {
+      dates.push(new Date(createdDate.getTime() + (7 * i) * day))
+    }
   }
   
   return dates
+}
+
+// Get the expected sequence based on role
+export const getExpectedSequence = (role: 'lead' | 'customer') => {
+  return role === 'lead'
+    ? [1, 2, 4, 7, 10, 14, 28]
+    : [7, 14, 21, 28] // Show next 4 weeks for customers
 }
 
 export const formatCompanyType = (type: string) => {

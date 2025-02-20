@@ -11,7 +11,7 @@ export async function POST(request: Request) {
     // Verify user is authenticated and has appropriate role
     const { data: { session } } = await supabase.auth.getSession()
     if (!session) {
-      return new NextResponse('Unauthorized', { status: 401 })
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
     const { data: currentUser } = await supabase
@@ -20,11 +20,44 @@ export async function POST(request: Request) {
       .eq('id', session.user.id)
       .single()
 
-    if (!currentUser || !['admin', 'super_admin'].includes(currentUser.role)) {
-      return new NextResponse('Forbidden', { status: 403 })
+    if (!currentUser || !['admin', 'super_admin', 'agent'].includes(currentUser.role)) {
+      return NextResponse.json({ error: 'Forbidden - Insufficient permissions' }, { status: 403 })
     }
 
-    // If admin, can only update users in their organization
+    // Get the user's current role before update
+    const { data: existingUser } = await supabase
+      .from('users')
+      .select('role')
+      .eq('id', userData.id)
+      .single()
+
+    if (!existingUser) {
+      return NextResponse.json({ error: 'User not found' }, { status: 404 })
+    }
+
+    // Check role hierarchy permissions for role changes
+    if (userData.role && userData.role !== existingUser.role) {
+      // Super admins can update to any role except super_admin
+      if (currentUser.role === 'super_admin') {
+        if (userData.role === 'super_admin') {
+          return NextResponse.json({ error: 'Cannot create super_admin users' }, { status: 403 })
+        }
+      }
+      // Admins can only update to agent, lead, or customer
+      else if (currentUser.role === 'admin') {
+        if (!['agent', 'lead', 'customer'].includes(userData.role)) {
+          return NextResponse.json({ error: 'Admins can only update users to agent, lead, or customer roles' }, { status: 403 })
+        }
+      }
+      // Agents can only update to lead or customer
+      else if (currentUser.role === 'agent') {
+        if (!['lead', 'customer'].includes(userData.role)) {
+          return NextResponse.json({ error: 'Agents can only update users to lead or customer roles' }, { status: 403 })
+        }
+      }
+    }
+
+    // If admin or agent, can only update users in their organization
     let updateQuery = supabase
       .from('users')
       .update({
@@ -42,7 +75,7 @@ export async function POST(request: Request) {
       })
       .eq('id', userData.id)
 
-    if (currentUser.role === 'admin') {
+    if (currentUser.role !== 'super_admin') {
       updateQuery = updateQuery.eq('organization_id', currentUser.organization_id)
     }
 
@@ -50,12 +83,12 @@ export async function POST(request: Request) {
 
     if (error) {
       console.error('Error updating user:', error)
-      return new NextResponse('Internal Server Error', { status: 500 })
+      return NextResponse.json({ error: error.message }, { status: 500 })
     }
 
     return NextResponse.json(updatedUser)
   } catch (error) {
     console.error('Error in update route:', error)
-    return new NextResponse('Internal Server Error', { status: 500 })
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
   }
 } 

@@ -30,6 +30,12 @@ export async function POST(request: Request) {
 
     // First try to get the user by listing users and filtering
     const { data: users, error: listError } = await adminClient.auth.admin.listUsers()
+    
+    if (listError) {
+      console.error('Error listing users:', listError)
+      return NextResponse.json({ error: 'Failed to check for existing user' }, { status: 500 })
+    }
+    
     const existingUser = users?.users.find(u => u.email?.toLowerCase() === email.toLowerCase())
     
     if (existingUser) {
@@ -55,6 +61,12 @@ export async function POST(request: Request) {
       // If we get an email_exists error, try to get the user one more time
       if (error.status === 422 && error.message.includes('already been registered')) {
         const { data: retryUsers, error: retryError } = await adminClient.auth.admin.listUsers()
+        
+        if (retryError) {
+          console.error('Error retrying user list:', retryError)
+          return NextResponse.json({ error: 'Failed to verify user creation' }, { status: 500 })
+        }
+        
         const retryUser = retryUsers?.users.find(u => u.email?.toLowerCase() === email.toLowerCase())
         if (retryUser) {
           console.log('Found user on retry:', retryUser)

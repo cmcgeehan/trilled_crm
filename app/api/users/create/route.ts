@@ -46,13 +46,36 @@ export async function POST(request: Request) {
 
     console.log('API: Current user:', currentUser)
 
-    if (!currentUser || !['admin', 'super_admin'].includes(currentUser.role)) {
+    // Check basic role permissions
+    if (!currentUser || !['admin', 'super_admin', 'agent'].includes(currentUser.role)) {
       console.log('API: User not authorized:', currentUser?.role)
-      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+      return NextResponse.json({ error: 'Forbidden - Insufficient permissions' }, { status: 403 })
     }
 
-    // If admin, can only create users in their organization
-    if (currentUser.role === 'admin' && userData.organization_id !== currentUser.organization_id) {
+    // Check role hierarchy permissions
+    if (userData.role) {
+      // Super admins can create any role except super_admin
+      if (currentUser.role === 'super_admin') {
+        if (userData.role === 'super_admin') {
+          return NextResponse.json({ error: 'Cannot create super_admin users' }, { status: 403 })
+        }
+      }
+      // Admins can only create agents, leads, and customers
+      else if (currentUser.role === 'admin') {
+        if (!['agent', 'lead', 'customer'].includes(userData.role)) {
+          return NextResponse.json({ error: 'Admins can only create agents, leads, and customers' }, { status: 403 })
+        }
+      }
+      // Agents can only create leads and customers
+      else if (currentUser.role === 'agent') {
+        if (!['lead', 'customer'].includes(userData.role)) {
+          return NextResponse.json({ error: 'Agents can only create leads and customers' }, { status: 403 })
+        }
+      }
+    }
+
+    // If admin or agent, can only create users in their organization
+    if (currentUser.role !== 'super_admin' && userData.organization_id !== currentUser.organization_id) {
       console.log('API: Organization mismatch:', {
         userOrg: userData.organization_id,
         currentUserOrg: currentUser.organization_id

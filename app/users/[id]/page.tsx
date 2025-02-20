@@ -5,7 +5,7 @@ import { useSearchParams, useRouter } from "next/navigation"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Button } from "@/components/ui/button"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
-import { Play, Send, Phone, AlertTriangle, Calendar, ChevronLeft, ChevronRight, Check } from "lucide-react"
+import { Play, Send, Phone, Calendar, ChevronLeft, ChevronRight, Check } from "lucide-react"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from "@/components/ui/dialog"
@@ -22,6 +22,7 @@ import { supabase } from "@/lib/supabase"
 import { Database } from "@/types/supabase"
 import { use } from "react"
 import Link from "next/link"
+import { calculateFollowUpDates } from "@/lib/utils"
 
 type UserStatus = Database['public']['Tables']['users']['Row']['status']
 type UserRole = Database['public']['Tables']['users']['Row']['role']
@@ -81,25 +82,6 @@ const followUpTypes = [
   { value: "tour" as const, label: "Tour" },
 ] as const
 
-// Helper function to get the day difference between two dates
-const getDayDifference = (date1: Date, date2: Date) => {
-  const diffTime = Math.abs(date2.getTime() - date1.getTime())
-  return Math.ceil(diffTime / (1000 * 60 * 60 * 24))
-}
-
-// Helper function to get the sequence day for a follow-up
-const getSequenceDay = (followUpDate: Date, createdDate: Date, role: 'lead' | 'customer') => {
-  const dayDiff = getDayDifference(new Date(createdDate), new Date(followUpDate))
-  const sequence = getExpectedSequence(role)
-  
-  // Find the closest sequence day
-  const closestDay = sequence.reduce((prev, curr) => {
-    return Math.abs(curr - dayDiff) < Math.abs(prev - dayDiff) ? curr : prev
-  })
-  
-  return closestDay
-}
-
 // Get the expected sequence based on role
 const getExpectedSequence = (role: 'lead' | 'customer') => {
   return role === 'lead'
@@ -110,22 +92,6 @@ const getExpectedSequence = (role: 'lead' | 'customer') => {
 const getCustomerDisplayName = (customer: Customer | null) => {
   if (!customer) return 'User Details'
   return [customer.first_name, customer.last_name].filter(Boolean).join(' ') || 'Unnamed Customer'
-}
-
-const calculateFollowUpDates = (createdDate: Date, role: 'lead' | 'customer') => {
-  const dates = []
-  const day = 24 * 60 * 60 * 1000 // milliseconds in a day
-
-  // Different intervals based on role
-  const intervals = role === 'lead' 
-    ? [1, 2, 4, 7, 10, 14, 28] // Lead follow-up sequence
-    : [14, 28, 42, 56, 70, 90, 120, 150, 180] // Customer follow-up sequence
-
-  for (const interval of intervals) {
-    dates.push(new Date(createdDate.getTime() + interval * day))
-  }
-  
-  return dates
 }
 
 export default function CustomerDetailPage({ params }: { params: Promise<{ id: string }> }) {
@@ -312,24 +278,79 @@ export default function CustomerDetailPage({ params }: { params: Promise<{ id: s
     loadAgents()
     loadCompanies()
 
-    // Set up real-time subscription for communications
-    const channel = supabase
-      .channel('communications')
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'communications',
-          filter: `user_id=eq.${id} AND direction=eq.internal`
-        },
-        () => {
-          loadCustomer() // Reload all data when communications change
-        }
-      )
-      .subscribe()
+    // Set up real-time subscription for communications with retry logic
+    let retryCount = 0
+    const maxRetries = 3
+    const retryDelay = 5000 // 5 seconds
+    let retryTimeout: NodeJS.Timeout | null = null
 
+    const setupSubscription = () => {
+      const channel = supabase
+        .channel(`communications-${id}-${Date.now()}`) // Add unique identifier with timestamp
+        .on(
+          'postgres_changes',
+          {
+            event: '*',
+            schema: 'public',
+            table: 'communications',
+            filter: `user_id=eq.${id} AND direction=eq.internal`
+          },
+          (payload) => {
+            console.log('Received communication change:', payload)
+            loadCustomer() // Reload all data when communications change
+          }
+        )
+        .subscribe((status, err) => {
+          console.log('Subscription status:', status)
+          
+          if (err) {
+            console.error('Subscription error:', err)
+          }
+
+          if (status === 'SUBSCRIBED') {
+            console.log('Successfully subscribed to communications changes')
+            retryCount = 0 // Reset retry count on successful subscription
+          }
+
+          if (status === 'TIMED_OUT' || status === 'CHANNEL_ERROR') {
+            console.error(`Subscription ${status}:`, err)
+            
+            // Attempt to resubscribe if under max retries
+            if (retryCount < maxRetries) {
+              retryCount++
+              console.log(`Retrying subscription (attempt ${retryCount}/${maxRetries})...`)
+              
+              // Clear any existing retry timeout
+              if (retryTimeout) {
+                clearTimeout(retryTimeout)
+              }
+              
+              // Set up new retry
+              retryTimeout = setTimeout(() => {
+                channel.unsubscribe()
+                setupSubscription()
+              }, retryDelay * Math.pow(2, retryCount - 1)) // Exponential backoff
+            } else {
+              console.error('Max retries reached, subscription failed')
+            }
+          }
+
+          if (status === 'CLOSED') {
+            console.log('Subscription closed')
+          }
+        })
+
+      return channel
+    }
+
+    const channel = setupSubscription()
+
+    // Cleanup subscription and any pending retries on unmount
     return () => {
+      console.log('Cleaning up subscription')
+      if (retryTimeout) {
+        clearTimeout(retryTimeout)
+      }
       channel.unsubscribe()
     }
   }, [id, loadCustomer, loadCompanies]) // Keep loadCustomer and loadCompanies in dependencies
@@ -526,63 +547,126 @@ export default function CustomerDetailPage({ params }: { params: Promise<{ id: s
   }
 
   const handleMarkAsLost = async () => {
-    if (!customer || !editedCustomer) return
-    
+    if (!customer) return
+
     try {
-      const lostReasonText = lostReason === 'other' ? otherReason : lostReasons.find(r => r.id === lostReason)?.label || 'Unknown'
-      const updates = {
-        status: 'lost' as const,
-        updated_at: new Date().toISOString(),
-        notes: customer.notes ? `${customer.notes}\n\nLost reason: ${lostReasonText}` : `Lost reason: ${lostReasonText}`,
-        lost_reason: lostReasonText,
-        lost_at: new Date().toISOString()
+      setLoading(true)
+      const updates: Database['public']['Tables']['users']['Update'] = {
+        lost_reason: lostReason || null,
+        lost_at: new Date().toISOString(),
+        status: 'lost'
       }
 
-      // First, delete any incomplete follow-ups
-      const { error: deleteError } = await supabase
-        .from('follow_ups')
-        .delete()
-        .eq('user_id', id)
-        .is('completed_at', null)
-
-      if (deleteError) throw deleteError
-
-      // Then update the user status
-      const { error: updateError } = await supabase
+      const { error: markError } = await supabase
         .from('users')
         .update(updates)
         .eq('id', id)
 
-      if (updateError) throw updateError
+      if (markError) throw markError
 
-      setCustomer(prev => ({
-        ...prev!,
-        ...updates
-      }))
-      setEditedCustomer(prev => ({
-        ...prev!,
-        ...updates
-      }))
+      setCustomer(prev => prev ? {
+        ...prev,
+        lost_reason: lostReason || null,
+        lost_at: new Date().toISOString(),
+        status: 'lost'
+      } : null)
+    } catch (err) {
+      console.error('Error marking customer as lost:', err)
+    } finally {
+      setLoading(false)
       setIsMarkingAsLost(false)
-      setLostReason("")
-      setOtherReason("")
+    }
+  }
+
+  const handleConvertToCustomer = async () => {
+    if (!customer) return
+
+    try {
+      setLoading(true)
       
-      // Reload follow-ups to reflect the deletions
+      // Call the convert-to-customer API endpoint
+      const response = await fetch('/api/users/convert-to-customer', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          userId: customer.id
+        })
+      })
+
+      if (!response.ok) {
+        const data = await response.json()
+        throw new Error(data.error || 'Failed to convert to customer')
+      }
+
+      // Update local state
+      setCustomer(prev => prev ? {
+        ...prev,
+        role: 'customer',
+        status: 'won'
+      } : null)
+
+      // Reload follow-ups to show new sequence
       await loadFollowUps()
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to mark customer as lost')
-      console.error('Error marking customer as lost:', err)
+      console.error('Error converting to customer:', err)
+      setError(err instanceof Error ? err.message : 'Failed to convert to customer')
+    } finally {
+      setLoading(false)
     }
   }
 
   const handleUpdateFollowUp = async (updates: Partial<FollowUp>) => {
-    if (!selectedFollowUp) return
+    if (!selectedFollowUp || !customer) return
 
     try {
       setIsUpdatingFollowUps(true)
-      const updateData: Database['public']['Tables']['follow_ups']['Update'] = {
-        type: updates.type || null,
-        completed_at: updates.completed ? new Date().toISOString() : null
+      const updateData: Database['public']['Tables']['follow_ups']['Update'] = {}
+      
+      // Only update type if it's provided in updates
+      if (updates.type) {
+        updateData.type = updates.type
+      }
+      
+      // Handle completion status separately
+      if ('completed' in updates) {
+        updateData.completed_at = updates.completed ? new Date().toISOString() : null
+
+        // If marking as complete and user is a lead, update their status to awaiting_response
+        if (updates.completed && customer.role === 'lead') {
+          const { error: userError } = await supabase
+            .from('users')
+            .update({ status: 'awaiting_response' })
+            .eq('id', customer.id)
+
+          if (userError) throw userError
+
+          // Fetch the updated user data
+          const { data: updatedUser, error: fetchError } = await supabase
+            .from('users')
+            .select(`
+              *,
+              companies (
+                id,
+                name
+              )
+            `)
+            .eq('id', customer.id)
+            .single()
+
+          if (fetchError) throw fetchError
+
+          if (updatedUser) {
+            const updatedCustomer = {
+              ...updatedUser,
+              company_id: updatedUser.companies?.id
+            }
+            // Update both customer and editedCustomer states
+            setCustomer(updatedCustomer)
+            setEditedCustomer(updatedCustomer)
+          }
+        }
       }
 
       const { error } = await supabase
@@ -723,48 +807,59 @@ export default function CustomerDetailPage({ params }: { params: Promise<{ id: s
             </p>
           </div>
           <div className="flex items-start gap-4">
-            {customer?.status !== 'lost' && (
-              <Dialog open={isMarkingAsLost} onOpenChange={setIsMarkingAsLost}>
-                <DialogTrigger asChild>
-                  <Button variant="outline" className="text-red-600 border-red-600 hover:bg-red-50" onClick={() => setIsMarkingAsLost(true)}>
-                    <AlertTriangle className="mr-2 h-4 w-4" /> Mark as Lost
-                  </Button>
-                </DialogTrigger>
-                <DialogContent>
-                  <DialogHeader>
-                    <DialogTitle>Mark Customer as Lost</DialogTitle>
-                  </DialogHeader>
-                  <div className="py-4">
-                    <Label htmlFor="lost-reason" className="mb-2 block">
-                      Select a reason:
-                    </Label>
-                    <RadioGroup id="lost-reason" value={lostReason} onValueChange={setLostReason}>
-                      {lostReasons.map((reason) => (
-                        <div key={reason.id} className="flex items-center space-x-2">
-                          <RadioGroupItem value={reason.id} id={reason.id} />
-                          <Label htmlFor={reason.id}>{reason.label}</Label>
-                        </div>
-                      ))}
-                    </RadioGroup>
-                    {lostReason === "other" && (
-                      <Textarea
-                        placeholder="Please specify the reason"
-                        value={otherReason}
-                        onChange={(e) => setOtherReason(e.target.value)}
-                        className="mt-2"
-                      />
-                    )}
-                  </div>
-                  <DialogFooter>
-                    <Button variant="outline" onClick={() => setIsMarkingAsLost(false)}>
-                      Cancel
-                    </Button>
-                    <Button variant="destructive" onClick={handleMarkAsLost}>
+            {customer?.role === 'lead' && customer?.status !== 'lost' && customer?.status !== 'won' && (
+              <>
+                <Dialog open={isMarkingAsLost} onOpenChange={setIsMarkingAsLost}>
+                  <DialogTrigger asChild>
+                    <Button
+                      variant="outline"
+                      className="border-brand-darkRed text-brand-darkRed hover:bg-brand-darkRed hover:text-white"
+                    >
                       Mark as Lost
                     </Button>
-                  </DialogFooter>
-                </DialogContent>
-              </Dialog>
+                  </DialogTrigger>
+                  <DialogContent>
+                    <DialogHeader>
+                      <DialogTitle>Mark Lead as Lost</DialogTitle>
+                    </DialogHeader>
+                    <div className="py-4">
+                      <Label htmlFor="lost-reason" className="mb-2 block">
+                        Select a reason:
+                      </Label>
+                      <RadioGroup id="lost-reason" value={lostReason} onValueChange={setLostReason}>
+                        {lostReasons.map((reason) => (
+                          <div key={reason.id} className="flex items-center space-x-2">
+                            <RadioGroupItem value={reason.id} id={reason.id} />
+                            <Label htmlFor={reason.id}>{reason.label}</Label>
+                          </div>
+                        ))}
+                      </RadioGroup>
+                      {lostReason === "other" && (
+                        <Textarea
+                          placeholder="Please specify the reason"
+                          value={otherReason}
+                          onChange={(e) => setOtherReason(e.target.value)}
+                          className="mt-2"
+                        />
+                      )}
+                    </div>
+                    <DialogFooter>
+                      <Button variant="outline" onClick={() => setIsMarkingAsLost(false)}>
+                        Cancel
+                      </Button>
+                      <Button variant="destructive" onClick={handleMarkAsLost} disabled={loading}>
+                        {loading ? 'Marking as Lost...' : 'Mark as Lost'}
+                      </Button>
+                    </DialogFooter>
+                  </DialogContent>
+                </Dialog>
+                <Button
+                  onClick={handleConvertToCustomer}
+                  className="bg-brand-darkBlue hover:bg-brand-darkBlue/90 text-white"
+                >
+                  Mark as Won
+                </Button>
+              </>
             )}
             <Dialog>
               <DialogTrigger asChild>
@@ -814,20 +909,15 @@ export default function CustomerDetailPage({ params }: { params: Promise<{ id: s
                 style={{ scrollBehavior: "smooth" }}
               >
                 {followUps.map((followUp) => {
-                  const sequenceDay = customer && followUp.date
-                    ? getSequenceDay(
-                        new Date(followUp.date), 
-                        new Date(customer.created_at),
-                        customer.role as 'lead' | 'customer'
-                      )
-                    : 0
+                  const isCompleted = !!followUp.completed_at
+                  const followUpDate = followUp.date ? new Date(followUp.date) : null
                   
                   return (
                     <div
                       key={followUp.id}
                       className={`flex-shrink-0 flex flex-col items-center justify-center w-28 h-32 border rounded-md cursor-pointer
                         ${selectedFollowUp?.id === followUp.id ? "bg-blue-100 border-blue-500" : "bg-white"}
-                        ${!!followUp.completed_at ? "opacity-50" : ""}
+                        ${isCompleted ? "opacity-50" : ""}
                         ${isUpdatingFollowUps ? "opacity-50 cursor-not-allowed" : ""}`}
                       onClick={() => !isUpdatingFollowUps && setSelectedFollowUp(followUp)}
                     >
@@ -835,15 +925,12 @@ export default function CustomerDetailPage({ params }: { params: Promise<{ id: s
                         className={`h-6 w-6 ${selectedFollowUp?.id === followUp.id ? "text-blue-500" : "text-gray-500"}`}
                       />
                       <span className="text-sm font-medium">
-                        {formatDateSafe(followUp.date)}
-                      </span>
-                      <span className="text-xs text-gray-500">
-                        Day {sequenceDay}
+                        {followUpDate ? followUpDate.toLocaleDateString() : '-'}
                       </span>
                       <Badge variant="secondary" className="mt-1">
                         {followUp.type || 'email'}
                       </Badge>
-                      {!!followUp.completed_at && <Check className="text-green-500 mt-1" />}
+                      {isCompleted && <Check className="text-green-500 mt-1" />}
                     </div>
                   )
                 })}
@@ -1112,14 +1199,23 @@ export default function CustomerDetailPage({ params }: { params: Promise<{ id: s
                         disabled={!canEdit()}
                       >
                         <SelectTrigger id="status" className="mt-1">
-                          <SelectValue placeholder="Select status" />
+                          <SelectValue>
+                            {editedCustomer?.status === 'won' 
+                              ? 'Won'
+                              : editedCustomer?.status === 'lost'
+                                ? 'Lost'
+                                : editedCustomer?.status?.split('_')
+                                    .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+                                    .join(' ') || 'Select status'
+                            }
+                          </SelectValue>
                         </SelectTrigger>
                         <SelectContent>
+                          {/* Only show non-won/lost options in dropdown */}
                           <SelectItem value="needs_response">Needs Response</SelectItem>
+                          <SelectItem value="awaiting_response">Awaiting Response</SelectItem>
                           <SelectItem value="new">New</SelectItem>
                           <SelectItem value="follow_up">Follow Up</SelectItem>
-                          <SelectItem value="won">Won</SelectItem>
-                          <SelectItem value="lost">Lost</SelectItem>
                         </SelectContent>
                       </Select>
                     </div>
@@ -1238,70 +1334,72 @@ export default function CustomerDetailPage({ params }: { params: Promise<{ id: s
                 <div className="bg-white p-6 rounded-lg shadow">
                   <h2 className="text-lg font-semibold mb-4">Conversation History</h2>
                   <div className="space-y-4 max-h-[800px] overflow-y-auto bg-gray-50 p-4 rounded-lg">
-                    {activeCase.interactions.map((interaction, index) => (
-                      <div
-                        key={index}
-                        className={`flex ${interaction.sender === "agent" ? "justify-end" : "justify-start"}`}
-                      >
-                        {interaction.type === "call" ? (
-                          <div className="bg-gray-100 p-3 rounded-lg max-w-[80%]">
-                            <div className="flex items-center space-x-2">
-                              <Avatar>
-                                <AvatarImage src="/placeholder-avatar.jpg" alt="Agent" />
-                                <AvatarFallback>AG</AvatarFallback>
-                              </Avatar>
-                              <div>
-                                <p className="font-semibold">Call on {interaction.date}</p>
+                    {activeCase.interactions.map((interaction: Interaction, index: number) => {
+                      return (
+                        <div
+                          key={index}
+                          className={`flex ${interaction.sender === "agent" ? "justify-end" : "justify-start"}`}
+                        >
+                          {interaction.type === "call" ? (
+                            <div className="bg-gray-100 p-3 rounded-lg max-w-[80%]">
+                              <div className="flex items-center space-x-2">
+                                <Avatar>
+                                  <AvatarImage src="/placeholder-avatar.jpg" alt="Agent" />
+                                  <AvatarFallback>AG</AvatarFallback>
+                                </Avatar>
+                                <div>
+                                  <p className="font-semibold">Call on {interaction.date}</p>
+                                  <p>{interaction.content}</p>
+                                  {interaction.duration && <p>Duration: {interaction.duration}</p>}
+                                </div>
+                              </div>
+                              {interaction.recordingUrl && (
+                                <Button variant="outline" size="sm" className="mt-2">
+                                  <Play className="mr-2 h-4 w-4" /> Play Recording
+                                </Button>
+                              )}
+                            </div>
+                          ) : (
+                            <div className="space-y-1">
+                              {interaction.sender === "customer" && (
+                                <p className="text-xs text-gray-500">
+                                  {interaction.type === "email"
+                                    ? customer?.email
+                                    : interaction.type === "sms"
+                                      ? customer?.phone
+                                      : ""}
+                                </p>
+                              )}
+                              {interaction.sender === "agent" && interaction.agentName && (
+                                <p className="text-xs text-gray-500 text-right">
+                                  Agent: {interaction.agentName} via{" "}
+                                  {interaction.type === "email"
+                                    ? "Email"
+                                    : interaction.type === "sms"
+                                      ? "SMS"
+                                      : interaction.type}
+                                </p>
+                              )}
+                              <div
+                                className={`p-3 rounded-lg max-w-[80%] ${
+                                  interaction.type === "internal"
+                                    ? "bg-yellow-100 w-full"
+                                    : interaction.sender === "agent"
+                                      ? "bg-blue-100"
+                                      : "bg-gray-100"
+                                }`}
+                              >
+                                <p className="text-sm text-gray-500 mb-1">
+                                  {interaction.date}
+                                  {interaction.type === "internal" && " - Internal Note"}
+                                </p>
                                 <p>{interaction.content}</p>
-                                {interaction.duration && <p>Duration: {interaction.duration}</p>}
                               </div>
                             </div>
-                            {interaction.recordingUrl && (
-                              <Button variant="outline" size="sm" className="mt-2">
-                                <Play className="mr-2 h-4 w-4" /> Play Recording
-                              </Button>
-                            )}
-                          </div>
-                        ) : (
-                          <div className="space-y-1">
-                            {interaction.sender === "customer" && (
-                              <p className="text-xs text-gray-500">
-                                {interaction.type === "email"
-                                  ? customer?.email
-                                  : interaction.type === "sms"
-                                    ? customer?.phone
-                                    : ""}
-                              </p>
-                            )}
-                            {interaction.sender === "agent" && interaction.agentName && (
-                              <p className="text-xs text-gray-500 text-right">
-                                Agent: {interaction.agentName} via{" "}
-                                {interaction.type === "email"
-                                  ? "Email"
-                                  : interaction.type === "sms"
-                                    ? "SMS"
-                                    : interaction.type}
-                              </p>
-                            )}
-                            <div
-                              className={`p-3 rounded-lg max-w-[80%] ${
-                                interaction.type === "internal"
-                                  ? "bg-yellow-100 w-full"
-                                  : interaction.sender === "agent"
-                                    ? "bg-blue-100"
-                                    : "bg-gray-100"
-                              }`}
-                            >
-                              <p className="text-sm text-gray-500 mb-1">
-                                {interaction.date}
-                                {interaction.type === "internal" && " - Internal Note"}
-                              </p>
-                              <p>{interaction.content}</p>
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    ))}
+                          )}
+                        </div>
+                      );
+                    })}
                   </div>
                   <div className="flex space-x-2 mt-4 bg-gray-100 p-4 rounded-lg">
                     <Select value={responseChannel} onValueChange={setResponseChannel}>
@@ -1335,11 +1433,11 @@ export default function CustomerDetailPage({ params }: { params: Promise<{ id: s
                           <div className="space-y-2">
                             <h4 className="font-medium leading-none">Click to Dial</h4>
                             <p className="text-sm text-muted-foreground">
-                              Initiate a call to {customer ? `${customer.first_name || ''} ${customer.last_name || ''}`.trim() || 'no phone number' : 'no phone number'}
+                              Initiate a call to {customer ? (customer.first_name || '') + ' ' + (customer.last_name || '') || 'no phone number' : 'no phone number'}
                             </p>
                           </div>
                           <Button onClick={handleClickToDial}>
-                            <Phone className="mr-2 h-4 w-4" /> Call {customer ? `${customer.first_name || ''} ${customer.last_name || ''}`.trim() || 'customer' : 'customer'}
+                            <Phone className="mr-2 h-4 w-4" /> Call {customer ? (customer.first_name || '') + ' ' + (customer.last_name || '') || 'customer' : 'customer'}
                           </Button>
                         </div>
                       </PopoverContent>

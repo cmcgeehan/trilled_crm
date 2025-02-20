@@ -1,35 +1,68 @@
-import { createRouteHandlerClient } from '@supabase/auth-helpers-nextjs'
-import { cookies } from 'next/headers'
+import { createClient } from '@supabase/supabase-js'
 import { NextResponse } from 'next/server'
-import { Database } from '@/types/supabase'
+
+// Ensure environment variables exist
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
+const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY
+
+if (!supabaseUrl || !supabaseServiceKey) {
+  throw new Error('Missing environment variables for Supabase')
+}
+
+const adminClient = createClient(
+  supabaseUrl,
+  supabaseServiceKey,
+  {
+    auth: {
+      autoRefreshToken: false,
+      persistSession: false
+    }
+  }
+)
+
+export async function GET() {
+  try {
+    const { data: users, error } = await adminClient
+      .from('users')
+      .select('*')
+      .is('deleted_at', null)
+      .order('created_at', { ascending: false })
+
+    if (error) {
+      console.error('Error fetching users:', error)
+      return NextResponse.json({ error: error.message }, { status: 500 })
+    }
+
+    return NextResponse.json({ users })
+  } catch (error) {
+    console.error('Error in users route:', error)
+    return NextResponse.json(
+      { error: 'Failed to fetch users' },
+      { status: 500 }
+    )
+  }
+}
 
 export async function POST(request: Request) {
   try {
-    // Create a Supabase client for the route handler
-    const supabase = createRouteHandlerClient<Database>({ cookies })
-    
     const userData = await request.json()
-    
-    // Insert the new customer
-    const { data: newCustomer, error: customerError } = await supabase
+
+    const { data, error } = await adminClient
       .from('users')
       .insert([userData])
       .select()
       .single()
 
-    if (customerError) {
-      console.error('Error creating customer:', customerError)
-      return NextResponse.json(
-        { error: customerError.message },
-        { status: 400 }
-      )
+    if (error) {
+      console.error('Error creating user:', error)
+      return NextResponse.json({ error: error.message }, { status: 400 })
     }
 
-    return NextResponse.json(newCustomer)
-  } catch (err) {
-    console.error('Error in user creation:', err)
+    return NextResponse.json({ user: data })
+  } catch (error) {
+    console.error('Error in users route:', error)
     return NextResponse.json(
-      { error: 'Internal server error' },
+      { error: 'Failed to create user' },
       { status: 500 }
     )
   }
