@@ -184,11 +184,11 @@ export default function NewUserPage() {
     }
   }
 
-  if (!currentUserRole || !['admin', 'super_admin'].includes(currentUserRole)) {
+  if (!currentUserRole) {
     return (
       <div className="container mx-auto py-10">
         <div className="bg-yellow-50 border border-yellow-200 text-yellow-800 px-4 py-3 rounded-md">
-          Only admins can create new users.
+          Please log in to create users.
         </div>
       </div>
     )

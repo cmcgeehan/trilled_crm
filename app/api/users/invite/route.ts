@@ -46,15 +46,18 @@ export async function POST(request: Request) {
     // If user doesn't exist, create them
     console.log('Creating new user with email:', email)
     
-    // Generate initial password as concatenation of user data
-    const initialPassword = `${userData.first_name.toLowerCase()}${userData.last_name.toLowerCase()}${email.toLowerCase()}${(userData.role || 'agent').toLowerCase()}`
+    // Generate initial password as concatenation of user data (without last name)
+    const initialPassword = `${userData.first_name.toLowerCase()}${email.toLowerCase()}${(userData.role || 'agent').toLowerCase()}`
 
     // Create the user with the initial password
     const { data, error } = await adminClient.auth.admin.createUser({
       email,
       password: initialPassword,
       email_confirm: true,
-      user_metadata: userData,
+      user_metadata: {
+        ...userData,
+        name: `${userData.first_name} ${userData.last_name}`.trim()
+      }
     })
 
     if (error) {
