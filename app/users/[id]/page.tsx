@@ -483,9 +483,15 @@ export default function CustomerDetailPage({ params }: { params: Promise<{ id: s
 
     try {
       setLoading(true)
-      const { error: updateError } = await supabase
-        .from('users')
-        .update({
+      
+      // Call the update API endpoint instead of direct Supabase update
+      const response = await fetch('/api/users/update', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          id: editedCustomer.id,
           first_name: editedCustomer.first_name,
           last_name: editedCustomer.last_name,
           email: editedCustomer.email,
@@ -494,24 +500,17 @@ export default function CustomerDetailPage({ params }: { params: Promise<{ id: s
           company_id: editedCustomer.company_id,
           notes: editedCustomer.notes,
           status: editedCustomer.status,
-          // Only update lost fields if status is changing to lost
-          ...(editedCustomer.status === 'lost' && customer?.status !== 'lost' ? {
-            lost_reason: 'Status changed manually',
-            lost_at: new Date().toISOString()
-          } : {}),
-          // Clear lost fields if status is changing from lost to needs_response
-          ...(editedCustomer.status === 'needs_response' && customer?.status === 'lost' ? {
-            lost_reason: null,
-            lost_at: null
-          } : {}),
           owner_id: editedCustomer.owner_id,
           role: editedCustomer.role,
         })
-        .eq('id', id)
+      })
 
-      if (updateError) throw updateError
+      if (!response.ok) {
+        const data = await response.json()
+        throw new Error(data.error || 'Failed to update user')
+      }
 
-      // Reload the customer to get the updated company name
+      // Reload the customer to get the updated data
       const { data: updatedData, error: fetchError } = await supabase
         .from('users')
         .select(`

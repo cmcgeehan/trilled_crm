@@ -1,12 +1,26 @@
-import { createRouteHandlerClient } from '@supabase/auth-helpers-nextjs'
+import { createClient } from '@supabase/supabase-js'
 import { cookies } from 'next/headers'
 import { NextResponse } from 'next/server'
+import { createRouteHandlerClient } from '@supabase/auth-helpers-nextjs'
+
+// Create a Supabase client with the service role key for admin operations
+const adminClient = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.SUPABASE_SERVICE_ROLE_KEY!,
+  {
+    auth: {
+      autoRefreshToken: false,
+      persistSession: false
+    }
+  }
+)
 
 export async function POST(request: Request) {
   try {
     const userData = await request.json()
     
-    const supabase = createRouteHandlerClient({ cookies })
+    const cookieStore = cookies()
+    const supabase = createRouteHandlerClient({ cookies: () => cookieStore })
     
     // Verify user is authenticated and has appropriate role
     const { data: { session } } = await supabase.auth.getSession()
@@ -14,24 +28,25 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    const { data: currentUser } = await supabase
+    // Use admin client for fetching current user to avoid cookie issues
+    const { data: currentUser, error: currentUserError } = await adminClient
       .from('users')
       .select('role, organization_id')
       .eq('id', session.user.id)
       .single()
 
-    if (!currentUser || !['admin', 'super_admin', 'agent'].includes(currentUser.role)) {
+    if (currentUserError || !currentUser || !['admin', 'super_admin', 'agent'].includes(currentUser.role)) {
       return NextResponse.json({ error: 'Forbidden - Insufficient permissions' }, { status: 403 })
     }
 
-    // Get the user's current role before update
-    const { data: existingUser } = await supabase
+    // Get the user's current role before update using admin client
+    const { data: existingUser, error: existingUserError } = await adminClient
       .from('users')
-      .select('role')
+      .select('role, organization_id')
       .eq('id', userData.id)
       .single()
 
-    if (!existingUser) {
+    if (existingUserError || !existingUser) {
       return NextResponse.json({ error: 'User not found' }, { status: 404 })
     }
 
@@ -57,33 +72,40 @@ export async function POST(request: Request) {
       }
     }
 
-    // If admin or agent, can only update users in their organization
-    let updateQuery = supabase
-      .from('users')
-      .update({
-        first_name: userData.first_name,
-        last_name: userData.last_name,
-        email: userData.email,
-        phone: userData.phone,
-        position: userData.position,
-        role: userData.role,
-        status: userData.status,
-        company_id: userData.company_id,
-        owner_id: userData.owner_id,
-        organization_id: userData.organization_id,
-        notes: userData.notes
-      })
-      .eq('id', userData.id)
-
-    if (currentUser.role !== 'super_admin') {
-      updateQuery = updateQuery.eq('organization_id', currentUser.organization_id)
+    // Check organization permissions
+    if (currentUser.role !== 'super_admin' && existingUser.organization_id !== currentUser.organization_id) {
+      return NextResponse.json({ error: 'Cannot update users from different organizations' }, { status: 403 })
     }
 
-    const { data: updatedUser, error } = await updateQuery.select().single()
+    // If admin or agent, can only update users in their organization
+    const updateData = {
+      first_name: userData.first_name,
+      last_name: userData.last_name,
+      email: userData.email,
+      phone: userData.phone,
+      position: userData.position,
+      role: userData.role,
+      status: userData.status,
+      company_id: userData.company_id,
+      owner_id: userData.owner_id,
+      notes: userData.notes
+    }
 
-    if (error) {
-      console.error('Error updating user:', error)
-      return NextResponse.json({ error: error.message }, { status: 500 })
+    // Use admin client for the update operation
+    const { data: updatedUser, error: updateError } = await adminClient
+      .from('users')
+      .update(updateData)
+      .eq('id', userData.id)
+      .select()
+      .single()
+
+    if (updateError) {
+      console.error('Error updating user:', updateError)
+      return NextResponse.json({ error: updateError.message }, { status: 500 })
+    }
+
+    if (!updatedUser) {
+      return NextResponse.json({ error: 'Failed to update user' }, { status: 404 })
     }
 
     return NextResponse.json(updatedUser)
