@@ -27,6 +27,7 @@ export default function NewUserPage() {
     last_name: "",
     email: "",
     phone: "",
+    position: "",
     company_id: "",
     role: "lead" as UserRole,
     status: "new" as UserStatus,
@@ -165,6 +166,7 @@ export default function NewUserPage() {
           last_name: formData.last_name,
           email: formData.email,
           phone: formData.phone,
+          position: formData.position,
           company_id: formData.company_id || null,
           notes: formData.notes,
           role: formData.role,
@@ -269,6 +271,17 @@ export default function NewUserPage() {
                     value={formData.phone}
                     onChange={(e) => setFormData(prev => ({ ...prev, phone: e.target.value }))}
                     placeholder="123-456-7890"
+                    className="mt-1"
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="position">Position</Label>
+                  <Input
+                    id="position"
+                    name="position"
+                    value={formData.position}
+                    onChange={(e) => setFormData(prev => ({ ...prev, position: e.target.value }))}
+                    placeholder="Software Engineer"
                     className="mt-1"
                   />
                 </div>
