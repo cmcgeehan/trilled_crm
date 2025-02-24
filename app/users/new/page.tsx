@@ -110,6 +110,13 @@ export default function NewUserPage() {
     setLoading(true)
     setError(null)
 
+    // Validate that either email or phone is provided
+    if (!formData.email && !formData.phone) {
+      setError('Either email or phone number is required')
+      setLoading(false)
+      return
+    }
+
     try {
       let userId: string;
 
@@ -242,7 +249,7 @@ export default function NewUserPage() {
                   />
                 </div>
                 <div>
-                  <Label htmlFor="email">Email *</Label>
+                  <Label htmlFor="email">Email</Label>
                   <Input
                     id="email"
                     name="email"
@@ -250,7 +257,6 @@ export default function NewUserPage() {
                     value={formData.email}
                     onChange={(e) => setFormData(prev => ({ ...prev, email: e.target.value }))}
                     placeholder="john@example.com"
-                    required
                     className="mt-1"
                   />
                 </div>
