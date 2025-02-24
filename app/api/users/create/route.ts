@@ -93,10 +93,11 @@ export async function POST(request: Request) {
       role: userData.role,
       status: userData.status,
       company_id: userData.company_id,
-      owner_id: userData.owner_id,
+      owner_id: userData.owner_id || (currentUser.role === 'agent' ? session.user.id : null),
       organization_id: userData.organization_id,
       notes: userData.notes,
-      created_at: userData.created_at || new Date().toISOString()
+      created_at: userData.created_at || new Date().toISOString(),
+      created_by: session.user.id
     }
 
     console.log('API: Attempting to create user with data:', insertData)
