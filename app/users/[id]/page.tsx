@@ -628,6 +628,45 @@ export default function CustomerDetailPage({ params }: { params: Promise<{ id: s
         updateData.type = updates.type
       }
       
+      // Handle date updates
+      if (updates.date) {
+        updateData.date = updates.date
+
+        // Find all follow-ups after the selected one
+        const selectedIndex = followUps.findIndex(fu => fu.id === selectedFollowUp.id)
+        if (selectedIndex !== -1 && selectedFollowUp.date) {
+          const subsequentFollowUps = followUps.slice(selectedIndex + 1)
+          console.log('Found subsequent follow-ups:', subsequentFollowUps)
+          
+          if (subsequentFollowUps.length > 0) {
+            // Calculate the time difference between the old and new date
+            const oldDate = new Date(selectedFollowUp.date)
+            const newDate = new Date(updates.date)
+            const timeDifference = newDate.getTime() - oldDate.getTime()
+            console.log('Time difference:', timeDifference, 'ms')
+
+            // Update each follow-up in sequence
+            for (const followUp of subsequentFollowUps) {
+              if (!followUp.date) continue
+              
+              const currentDate = new Date(followUp.date)
+              const newFollowUpDate = new Date(currentDate.getTime() + timeDifference)
+              console.log(`Updating follow-up ${followUp.id} from ${followUp.date} to ${newFollowUpDate.toISOString()}`)
+              
+              const { error: updateError } = await supabase
+                .from('follow_ups')
+                .update({ date: newFollowUpDate.toISOString() })
+                .eq('id', followUp.id)
+
+              if (updateError) {
+                console.error(`Error updating follow-up ${followUp.id}:`, updateError)
+                throw updateError
+              }
+            }
+          }
+        }
+      }
+      
       // Handle completion status separately
       if ('completed' in updates) {
         updateData.completed_at = updates.completed ? new Date().toISOString() : null
@@ -668,6 +707,7 @@ export default function CustomerDetailPage({ params }: { params: Promise<{ id: s
         }
       }
 
+      // Update the selected follow-up
       const { error } = await supabase
         .from('follow_ups')
         .update(updateData)

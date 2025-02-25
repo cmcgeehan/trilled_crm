@@ -343,6 +343,52 @@ export interface Database {
         }
         Relationships: []
       }
+      email_integrations: {
+        Row: {
+          id: string
+          user_id: string
+          provider: 'gmail' | 'outlook'
+          refresh_token: string
+          access_token: string | null
+          token_expires_at: string | null
+          email: string
+          created_at: string
+          updated_at: string
+          deleted_at: string | null
+        }
+        Insert: {
+          id?: string
+          user_id: string
+          provider: 'gmail' | 'outlook'
+          refresh_token: string
+          access_token?: string | null
+          token_expires_at?: string | null
+          email: string
+          created_at?: string
+          updated_at?: string
+          deleted_at?: string | null
+        }
+        Update: {
+          id?: string
+          user_id?: string
+          provider?: 'gmail' | 'outlook'
+          refresh_token?: string
+          access_token?: string | null
+          token_expires_at?: string | null
+          email?: string
+          created_at?: string
+          updated_at?: string
+          deleted_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "email_integrations_user_id_fkey"
+            columns: ["user_id"]
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          }
+        ]
+      }
     }
     Views: {}
     Functions: {}

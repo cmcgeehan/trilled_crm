@@ -11,6 +11,7 @@ import { supabase } from "@/lib/supabase"
 export default function NewCustomerPage() {
   const router = useRouter()
   const [loading, setLoading] = useState(false)
+  const [initializing, setInitializing] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [currentOrganizationId, setCurrentOrganizationId] = useState<string | null>(null)
   const [formData, setFormData] = useState({
@@ -43,7 +44,9 @@ export default function NewCustomerPage() {
         }
       } catch (error) {
         console.error('Error checking session:', error)
-        router.replace('/login')
+        setError('Failed to initialize page. Please try again.')
+      } finally {
+        setInitializing(false)
       }
     }
 
@@ -88,6 +91,14 @@ export default function NewCustomerPage() {
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     const { name, value } = e.target
     setFormData(prev => ({ ...prev, [name]: value }))
+  }
+
+  if (initializing) {
+    return (
+      <div className="flex items-center justify-center min-h-screen">
+        <p>Loading...</p>
+      </div>
+    )
   }
 
   return (
