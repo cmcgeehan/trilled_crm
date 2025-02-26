@@ -48,6 +48,7 @@ export default function UsersPage() {
   const [roleFilter, setRoleFilter] = useState<UserRole | null>(null)
   const [statusFilter, setStatusFilter] = useState<UserStatus | null>(null)
   const [ownerFilter, setOwnerFilter] = useState<string>('all')
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null)
   const [agents, setAgents] = useState<User[]>([])
   const [currentUserRole, setCurrentUserRole] = useState<UserRole | null>(null)
   const [currentOrganizationId, setCurrentOrganizationId] = useState<string | null>(null)
@@ -187,6 +188,9 @@ export default function UsersPage() {
         if (userData) {
           setCurrentUserRole(userData.role)
           setCurrentOrganizationId(userData.organization_id)
+          // Set the current user ID and default owner filter
+          setCurrentUserId(session.user.id)
+          setOwnerFilter(session.user.id)
         }
 
         setUserContextLoaded(true)
@@ -236,7 +240,7 @@ export default function UsersPage() {
   const handleClearFilters = () => {
     setRoleFilter(null)
     setStatusFilter(null)
-    setOwnerFilter('all')
+    setOwnerFilter(currentUserId || 'all')
     setSearchInput("")
     setSearchTerm("")
   }
