@@ -11,6 +11,7 @@ type UserRole = 'lead' | 'customer' | 'agent' | 'admin' | 'super_admin'
 const FIELDS = [
   { name: 'name', description: 'Company name (required)' },
   { name: 'type', description: 'Company type (required) - must match one of the predefined types' },
+  { name: 'website', description: 'Website URL (optional)' },
   { name: 'street_address', description: 'Street address (optional)' },
   { name: 'neighborhood', description: 'Neighborhood (optional)' },
   { name: 'city', description: 'City (optional)' },
@@ -64,6 +65,7 @@ type CompanyData = {
   id?: string;
   name: string;
   type: string;
+  website?: string | null;
   street_address?: string | null;
   neighborhood?: string | null;
   city?: string | null;
@@ -248,6 +250,7 @@ export default function BulkUpsertPage() {
           companiesToUpdate.push({
             name: companyData.name,
             type: companyData.type,
+            website: companyData.website || null,
             street_address: companyData.street_address || null,
             neighborhood: companyData.neighborhood || null,
             city: companyData.city || null,
@@ -261,6 +264,7 @@ export default function BulkUpsertPage() {
           companiesToInsert.push({
             name: companyData.name,
             type: companyData.type,
+            website: companyData.website || null,
             street_address: companyData.street_address || null,
             neighborhood: companyData.neighborhood || null,
             city: companyData.city || null,

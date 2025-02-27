@@ -22,6 +22,7 @@ type Company = Database['public']['Tables']['companies']['Row'] & {
   state?: string | null;
   postal_code?: string | null;
   country?: string | null;
+  website?: string | null;
   status?: string;
   type: CompanyType;
   notes?: string | null;
@@ -170,6 +171,7 @@ export default function CompanyDetailsPage({ params }: { params: Promise<{ id: s
         .update({
           name: editedCompany.name,
           type: editedCompany.type as CompanyType,
+          website: editedCompany.website,
           street_address: editedCompany.street_address,
           neighborhood: editedCompany.neighborhood,
           city: editedCompany.city,
@@ -199,7 +201,7 @@ export default function CompanyDetailsPage({ params }: { params: Promise<{ id: s
   }
 
   const canEdit = () => {
-    return ['admin', 'super_admin'].includes(currentUserRole || '')
+    return ['agent', 'admin', 'super_admin'].includes(currentUserRole || '')
   }
 
   const handleDelete = async () => {
@@ -298,7 +300,7 @@ export default function CompanyDetailsPage({ params }: { params: Promise<{ id: s
           <div className="space-y-4">
             {!canEdit() && (
               <div className="bg-yellow-50 border border-yellow-200 text-yellow-800 px-4 py-3 rounded-md mb-4">
-                Only admins can edit company details.
+                Only agents and admins can edit company details.
               </div>
             )}
             <div className="grid grid-cols-2 gap-4">
@@ -307,9 +309,21 @@ export default function CompanyDetailsPage({ params }: { params: Promise<{ id: s
                   <Label htmlFor="name">Company Name</Label>
                   <Input
                     id="name"
-                    value={editedCompany.name || ''}
+                    value={editedCompany?.name || ''}
                     onChange={(e) => setEditedCompany(prev => ({ ...prev!, name: e.target.value }))}
                     className="mt-1"
+                    disabled={!canEdit()}
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="website">Website</Label>
+                  <Input
+                    id="website"
+                    value={editedCompany?.website || ''}
+                    onChange={(e) => setEditedCompany(prev => ({ ...prev!, website: e.target.value }))}
+                    className="mt-1"
+                    type="url"
+                    placeholder="https://example.com"
                     disabled={!canEdit()}
                   />
                 </div>

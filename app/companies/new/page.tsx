@@ -18,6 +18,7 @@ type NewCompany = {
   state: string;
   postal_code: string;
   country: string;
+  website: string;
 }
 
 export default function NewCompanyPage() {
@@ -35,6 +36,7 @@ export default function NewCompanyPage() {
     state: '',
     postal_code: '',
     country: '',
+    website: '',
   })
 
   useEffect(() => {
@@ -68,7 +70,7 @@ export default function NewCompanyPage() {
   }, [router])
 
   const canCreate = () => {
-    return ['admin', 'super_admin', 'agent'].includes(currentUserRole || '')
+    return ['agent', 'admin', 'super_admin'].includes(currentUserRole || '')
   }
 
   const handleCreateCompany = async () => {
@@ -93,6 +95,7 @@ export default function NewCompanyPage() {
           state: newCompany.state || null,
           postal_code: newCompany.postal_code || null,
           country: newCompany.country || null,
+          website: newCompany.website || null,
           organization_id: currentOrganizationId
         })
         .select()
@@ -113,7 +116,7 @@ export default function NewCompanyPage() {
     return (
       <div className="container mx-auto py-10">
         <div className="bg-yellow-50 border border-yellow-200 text-yellow-800 px-4 py-3 rounded-md">
-          Only admins can create new companies.
+          Only agents and admins can create new companies.
         </div>
       </div>
     )
@@ -149,6 +152,17 @@ export default function NewCompanyPage() {
                     onChange={(e) => setNewCompany(prev => ({ ...prev, name: e.target.value }))}
                     className="mt-1"
                     required
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="website">Website</Label>
+                  <Input
+                    id="website"
+                    value={newCompany.website || ''}
+                    onChange={(e) => setNewCompany(prev => ({ ...prev, website: e.target.value }))}
+                    className="mt-1"
+                    type="url"
+                    placeholder="https://example.com"
                   />
                 </div>
                 <div>
