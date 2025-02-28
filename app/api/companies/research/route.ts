@@ -9,29 +9,33 @@ if (!supabaseUrl || !supabaseServiceKey) {
   throw new Error('Missing environment variables for Supabase')
 }
 
-// Create a Supabase client with the service role key
-const supabase = createClient(
-  supabaseUrl,
-  supabaseServiceKey,
-  {
-    auth: {
-      autoRefreshToken: false,
-      persistSession: false,
-      detectSessionInUrl: false
-    },
-    global: {
-      headers: {
-        'x-my-custom-header': 'service-role'
+// Create a function to initialize the Supabase client
+async function initSupabaseClient() {
+  const supabase = createClient(
+    supabaseUrl as string,
+    supabaseServiceKey as string,
+    {
+      auth: {
+        autoRefreshToken: false,
+        persistSession: false,
+        detectSessionInUrl: false
+      },
+      global: {
+        headers: {
+          'x-my-custom-header': 'service-role'
+        }
       }
     }
-  }
-)
+  )
 
-// Set auth context to use service role
-await supabase.auth.setSession({
-  access_token: supabaseServiceKey,
-  refresh_token: ''
-})
+  // Set auth context to use service role
+  await supabase.auth.setSession({
+    access_token: supabaseServiceKey as string,
+    refresh_token: ''
+  })
+
+  return supabase
+}
 
 type AIResearchResponse = {
   first_name?: string;
@@ -92,7 +96,8 @@ type CompanyUpdateData = {
 
 // Define allowed methods
 export const dynamic = 'force-dynamic'
-export const runtime = 'nodejs'
+export const runtime = 'edge'
+export const maxDuration = 300 // Set maximum duration to 300 seconds (5 minutes)
 
 // Handle OPTIONS requests for CORS
 export async function OPTIONS() {
@@ -148,6 +153,7 @@ function extractCompanyInfo(data: AIResearchResponse) {
 }
 
 export async function POST(request: Request) {
+  const supabase = await initSupabaseClient()
   // Add CORS headers to the response
   const headers = {
     'Access-Control-Allow-Origin': '*',
@@ -402,6 +408,7 @@ export async function POST(request: Request) {
 
 // Handle GET requests for SSE
 export async function GET(request: Request) {
+  const supabase = await initSupabaseClient()
   const headers = {
     'Content-Type': 'text/event-stream',
     'Cache-Control': 'no-cache',

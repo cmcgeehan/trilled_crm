@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { useRouter } from "next/navigation"
+import { useRouter, useParams } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -11,9 +11,14 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Badge } from "@/components/ui/badge"
 import { supabase } from "@/lib/supabase"
 import { Database } from "@/types/supabase"
-import { use } from "react"
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
 import { Loader2 } from "lucide-react"
+
+declare global {
+  interface Window {
+    activeEventSource: EventSource | null;
+  }
+}
 
 type Company = Database['public']['Tables']['companies']['Row'] & {
   street_address?: string | null;
@@ -64,8 +69,9 @@ type CompanyType =
 
 type User = Database['public']['Tables']['users']['Row']
 
-export default function CompanyDetailsPage({ params }: { params: Promise<{ id: string }> }) {
-  const id = use(params).id
+export default function CompanyDetailsPage() {
+  const params = useParams()
+  const id = params.id as string
   const router = useRouter()
   const [company, setCompany] = useState<Company | null>(null)
   const [users, setUsers] = useState<User[]>([])
@@ -239,10 +245,10 @@ export default function CompanyDetailsPage({ params }: { params: Promise<{ id: s
   }
 
   const handleAIResearch = async () => {
-    if (!company) return
+    if (!company) return;
 
     try {
-      setIsResearching(true)
+      setIsResearching(true);
 
       // Get current user's session
       const { data: { session } } = await supabase.auth.getSession()
@@ -255,101 +261,126 @@ export default function CompanyDetailsPage({ params }: { params: Promise<{ id: s
         companyName: company.name || '',
         companyId: company.id,
         requesterId: session.user.id,
-        role: currentUserRole || 'agent' // Add role parameter
+        role: currentUserRole || 'agent'
       });
 
-      // Create EventSource with authorization header
-      const eventSource = new EventSource(`/api/companies/research?${params.toString()}`, {
-        withCredentials: true
-      });
+      let retryCount = 0;
+      const maxRetries = 3;
+      const retryDelay = 2000; // 2 seconds
 
-      // Set up event handlers
-      eventSource.onmessage = (event) => {
-        try {
-          const data = JSON.parse(event.data);
-          console.log('Received message:', data);
-        } catch (err) {
-          console.error('Error parsing message:', err);
+      const connectEventSource = () => {
+        // Close any existing connection
+        if (window.activeEventSource) {
+          window.activeEventSource.close();
         }
-      };
 
-      eventSource.addEventListener('ping', (event: MessageEvent) => {
-        try {
-          const data = JSON.parse(event.data);
-          console.log('Received ping:', data);
-        } catch (err) {
-          console.error('Error parsing ping:', err);
-        }
-      });
+        // Create EventSource with authorization header
+        const eventSource = new EventSource(`/api/companies/research?${params.toString()}`, {
+          withCredentials: true
+        });
 
-      eventSource.addEventListener('complete', (event: MessageEvent) => {
-        try {
-          const researchData = JSON.parse(event.data);
-          console.log('Research complete:', researchData);
-          
-          if (researchData.status === 'success') {
-            let message = 'Research completed successfully.';
+        // Store the active EventSource globally so we can close it if needed
+        window.activeEventSource = eventSource;
+
+        // Set up event handlers
+        eventSource.onmessage = (event) => {
+          try {
+            const data = JSON.parse(event.data);
+            console.log('Received message:', data);
+          } catch (err) {
+            console.error('Error parsing message:', err);
+          }
+        };
+
+        eventSource.addEventListener('ping', (event: MessageEvent) => {
+          try {
+            const data = JSON.parse(event.data);
+            console.log('Received ping:', data);
+          } catch (err) {
+            console.error('Error parsing ping:', err);
+          }
+        });
+
+        eventSource.addEventListener('complete', (event: MessageEvent) => {
+          try {
+            const researchData = JSON.parse(event.data);
+            console.log('Research complete:', researchData);
             
-            // Update users list if a new user was created
-            if (researchData.user) {
-              setUsers(prev => [researchData.user, ...prev]);
-              message = 'Successfully created new lead from AI research';
-            }
-
-            // Update company data if it was modified
-            if (researchData.company) {
-              setCompany(researchData.company);
-              setEditedCompany(researchData.company);
-              if (!researchData.user) {
-                message = 'Successfully updated company information';
+            if (researchData.status === 'success') {
+              let message = 'Research completed successfully.';
+              
+              // Update users list if a new user was created
+              if (researchData.user) {
+                setUsers(prev => [researchData.user, ...prev]);
+                message = 'Successfully created new lead from AI research';
               }
+
+              // Update company data if it was modified
+              if (researchData.company) {
+                setCompany(researchData.company);
+                setEditedCompany(researchData.company);
+                if (!researchData.user) {
+                  message = 'Successfully updated company information';
+                }
+              }
+
+              // Show success message
+              alert(message);
+            } else {
+              console.error('Invalid research response:', researchData);
+              throw new Error(researchData.error || 'Research failed to return expected data');
             }
-
-            // Show success message
-            alert(message);
-          } else {
-            console.error('Invalid research response:', researchData);
-            throw new Error(researchData.error || 'Research failed to return expected data');
+          } catch (err) {
+            console.error('Error handling complete event:', err);
+            alert('Error processing research results: ' + (err instanceof Error ? err.message : 'Unknown error'));
+          } finally {
+            eventSource.close();
+            setIsResearching(false);
           }
-        } catch (err) {
-          console.error('Error handling complete event:', err);
-          alert('Error processing research results: ' + (err instanceof Error ? err.message : 'Unknown error'));
-        } finally {
+        });
+
+        eventSource.addEventListener('error', async (event: MessageEvent) => {
+          console.error('Research error event:', event);
+          let errorMessage = 'Unknown error occurred';
+          
+          try {
+            if (event.data) {
+              const errorData = JSON.parse(event.data);
+              errorMessage = errorData.error || errorMessage;
+            }
+          } catch (e) {
+            console.error('Error parsing error data:', e);
+          }
+
+          // Close the current connection
           eventSource.close();
-          setIsResearching(false);
-        }
-      });
 
-      eventSource.addEventListener('error', (event: MessageEvent) => {
-        console.error('Research error event:', event);
-        let errorMessage = 'Unknown error occurred';
-        
-        try {
-          if (event.data) {
-            const errorData = JSON.parse(event.data);
-            errorMessage = errorData.error || errorMessage;
+          // If we haven't exceeded max retries and it's a timeout error, try again
+          if (retryCount < maxRetries && (errorMessage.includes('timeout') || !event.data)) {
+            console.log(`Retrying connection (${retryCount + 1}/${maxRetries})...`);
+            retryCount++;
+            await new Promise(resolve => setTimeout(resolve, retryDelay));
+            connectEventSource();
+          } else {
+            alert('Failed to perform AI research: ' + errorMessage);
+            setIsResearching(false);
           }
-        } catch (e) {
-          console.error('Error parsing error data:', e);
-        }
+        });
 
-        alert('Failed to perform AI research: ' + errorMessage);
-        eventSource.close();
-        setIsResearching(false);
-      });
-
-      eventSource.onerror = (error) => {
-        console.error('EventSource connection error:', error);
-        eventSource.close();
-        setIsResearching(false);
-        alert('Failed to connect to research service. Please try again.');
+        eventSource.onerror = (error) => {
+          console.error('EventSource connection error:', error);
+          eventSource.close();
+        };
       };
 
-      // Add cleanup function
+      // Initial connection
+      connectEventSource();
+
+      // Cleanup function
       return () => {
-        if (eventSource) {
+        if (window.activeEventSource) {
           console.log('Cleaning up EventSource connection');
-          eventSource.close();
+          window.activeEventSource.close();
           setIsResearching(false);
         }
       };
@@ -359,7 +390,7 @@ export default function CompanyDetailsPage({ params }: { params: Promise<{ id: s
       alert('Failed to start AI research: ' + (err instanceof Error ? err.message : 'Unknown error'));
       setIsResearching(false);
     }
-  }
+  };
 
   if (loading) {
     return (
