@@ -76,4 +76,22 @@ export const config = {
      */
     '/((?!api|_next/static|_next/image|favicon.ico).*)',
   ],
+}
+
+export function corsMiddleware(request: NextRequest) {
+  // Get the response
+  const response = NextResponse.next()
+
+  // Add CORS headers
+  response.headers.set('Access-Control-Allow-Origin', '*')
+  response.headers.set('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS')
+  response.headers.set('Access-Control-Allow-Headers', '*')
+  response.headers.set('Access-Control-Max-Age', '86400')
+
+  return response
+}
+
+// Configure the middleware to run on API routes
+export const corsConfig = {
+  matcher: '/api/:path*',
 } 

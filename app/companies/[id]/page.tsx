@@ -13,7 +13,7 @@ import { supabase } from "@/lib/supabase"
 import { Database } from "@/types/supabase"
 import { use } from "react"
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
-import { formatCompanyType } from "@/lib/utils"
+import { Loader2 } from "lucide-react"
 
 type Company = Database['public']['Tables']['companies']['Row'] & {
   street_address?: string | null;
@@ -75,6 +75,7 @@ export default function CompanyDetailsPage({ params }: { params: Promise<{ id: s
   const [currentOrganizationId, setCurrentOrganizationId] = useState<string | null>(null)
   const [isDeleting, setIsDeleting] = useState(false)
   const [deleteError, setDeleteError] = useState<string | null>(null)
+  const [isResearching, setIsResearching] = useState(false)
 
   useEffect(() => {
     const loadCompanyAndUsers = async () => {
@@ -235,6 +236,79 @@ export default function CompanyDetailsPage({ params }: { params: Promise<{ id: s
     setEditedCompany(prev => prev ? { ...prev, type: value as CompanyType } : null)
   }
 
+  const handleAIResearch = async () => {
+    if (!company) return
+
+    try {
+      setIsResearching(true)
+
+      // Get current user's session
+      const { data: { session } } = await supabase.auth.getSession()
+      if (!session) {
+        throw new Error('No active session found')
+      }
+
+      // Get research results from AI
+      const researchResponse = await fetch('/api/companies/research', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${session.access_token}`
+        },
+        body: JSON.stringify({
+          companyName: company.name,
+          companyId: company.id,
+          requesterId: session.user.id
+        }),
+      })
+
+      if (!researchResponse.ok) {
+        throw new Error('Failed to perform AI research')
+      }
+
+      const researchData = await researchResponse.json()
+      
+      // Create user from research results
+      const createUserResponse = await fetch(`/api/research/users`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          companyId: company.id,
+          name: researchData.name,
+          email: researchData.email,
+          position: researchData.position,
+          ownerId: researchData.owner_id
+        }),
+      })
+
+      if (!createUserResponse.ok) {
+        const errorText = await createUserResponse.text()
+        console.error('Create user error:', {
+          status: createUserResponse.status,
+          statusText: createUserResponse.statusText,
+          body: errorText
+        })
+        throw new Error('Failed to create user from research')
+      }
+
+      const newUser = await createUserResponse.json()
+      
+      // Update users list
+      setUsers(prev => [newUser, ...prev])
+
+      // Show success message
+      alert('Successfully created new lead from AI research')
+
+    } catch (err) {
+      console.error('Error performing AI research:', err)
+      alert('Failed to perform AI research: ' + (err instanceof Error ? err.message : 'Unknown error'))
+    } finally {
+      setIsResearching(false)
+    }
+  }
+
   if (loading) {
     return (
       <div className="flex items-center justify-center min-h-screen">
@@ -253,42 +327,56 @@ export default function CompanyDetailsPage({ params }: { params: Promise<{ id: s
 
   return (
     <div className="container mx-auto py-10 space-y-8">
-      <div className="flex justify-between items-start">
+      <div className="flex justify-between items-center">
         <div>
           <h1 className="text-3xl font-bold text-gray-900">{company.name}</h1>
-          <div className="mt-2">
-            <Badge variant="secondary">
-              {company.type ? formatCompanyType(company.type) : 'No Type Set'}
-            </Badge>
-          </div>
+          <p className="text-sm text-muted-foreground mt-2">
+            Company Details
+          </p>
         </div>
-        <div className="flex gap-4">
-          <Dialog>
-            <DialogTrigger asChild>
-              <Button variant="outline" className="text-red-600 border-red-600 hover:bg-red-50" disabled={isDeleting}>
-                {isDeleting ? 'Deleting...' : 'Delete Company'}
-              </Button>
-            </DialogTrigger>
-            <DialogContent>
-              <DialogHeader>
-                <DialogTitle>Are you sure you want to delete this company?</DialogTitle>
-              </DialogHeader>
-              <p className="text-muted-foreground">
-                This action cannot be undone. This will permanently delete the company.
-              </p>
-              {deleteError && (
-                <p className="text-red-500">{deleteError}</p>
-              )}
-              <DialogFooter>
-                <Button variant="outline" onClick={() => setIsDeleting(false)}>
-                  Cancel
+        <div className="flex items-center gap-4">
+          <Button
+            onClick={handleAIResearch}
+            disabled={isResearching}
+            className="bg-brand-darkBlue hover:bg-brand-darkBlue/90 text-white"
+          >
+            {isResearching ? (
+              <>
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                Researching...
+              </>
+            ) : (
+              'Request AI Research'
+            )}
+          </Button>
+          {canEdit() && (
+            <Dialog>
+              <DialogTrigger asChild>
+                <Button variant="outline" className="text-red-600 border-red-600 hover:bg-red-50" disabled={isDeleting}>
+                  {isDeleting ? 'Deleting...' : 'Delete Company'}
                 </Button>
-                <Button variant="destructive" onClick={handleDelete} disabled={isDeleting}>
-                  {isDeleting ? 'Deleting...' : 'Delete'}
-                </Button>
-              </DialogFooter>
-            </DialogContent>
-          </Dialog>
+              </DialogTrigger>
+              <DialogContent>
+                <DialogHeader>
+                  <DialogTitle>Are you sure you want to delete this company?</DialogTitle>
+                </DialogHeader>
+                <p className="text-muted-foreground">
+                  This action cannot be undone. This will permanently delete the company and remove all associations.
+                </p>
+                {deleteError && (
+                  <p className="text-red-500">{deleteError}</p>
+                )}
+                <DialogFooter>
+                  <Button variant="outline" onClick={() => setIsDeleting(false)}>
+                    Cancel
+                  </Button>
+                  <Button variant="destructive" onClick={handleDelete} disabled={isDeleting}>
+                    {isDeleting ? 'Deleting...' : 'Delete'}
+                  </Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
+          )}
         </div>
       </div>
 
@@ -519,4 +607,4 @@ export default function CompanyDetailsPage({ params }: { params: Promise<{ id: s
       </Card>
     </div>
   )
-} 
+}

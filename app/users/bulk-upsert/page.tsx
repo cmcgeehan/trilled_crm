@@ -22,7 +22,7 @@ type UserData = {
   id?: string;
   first_name: string;
   last_name: string;
-  email?: string | null;
+  email: string | null;
   phone?: string | null;
   position?: string | null;
   role: UserRole;
@@ -345,22 +345,28 @@ export default function BulkUpsertPage() {
 
       // Process all valid users
       // First, get all existing users in one query
-      const userEmails = usersToValidate.map(u => u.email?.toLowerCase()).filter((email): email is string => email !== null)
-      
-      // Use API route to check existing users
-      const existingUsersResponse = await fetch('/api/users/check-existing', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ emails: userEmails })
-      })
+      const userEmails = usersToValidate
+        .map(u => u.email?.toLowerCase())
+        .filter((email): email is string => email !== null && email !== undefined)
 
-      if (!existingUsersResponse.ok) {
-        throw new Error('Failed to check existing users')
+      // Only check for existing users if we have emails to check
+      let existingUsers: Array<{ id: string; email: string }> = []
+      if (userEmails.length > 0) {
+        // Use API route to check existing users
+        const existingUsersResponse = await fetch('/api/users/check-existing', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ emails: userEmails })
+        })
+
+        if (!existingUsersResponse.ok) {
+          throw new Error('Failed to check existing users')
+        }
+
+        existingUsers = await existingUsersResponse.json()
       }
-
-      const existingUsers = (await existingUsersResponse.json()) as Array<{ id: string; email: string }>
 
       // Create a map of existing users by email for quick lookup
       const existingUserMap = new Map(
@@ -372,12 +378,10 @@ export default function BulkUpsertPage() {
       const usersToInsert: UserData[] = []
 
       for (const userData of usersToValidate) {
-        if (!userData.email) continue
-
         const processedUser: UserData = {
           first_name: userData.first_name || '',
           last_name: userData.last_name || '',
-          email: userData.email,
+          email: userData.email || null,
           phone: userData.phone || null,
           position: userData.position || null,
           role: (userData.role as UserRole) || 'lead',
@@ -389,16 +393,9 @@ export default function BulkUpsertPage() {
         // Set company_id if company_name exists and was found
         if (userData.company_name) {
           const normalizedCompanyName = userData.company_name.toLowerCase().trim()
-          console.log('Looking up company:', {
-            original: userData.company_name,
-            normalized: normalizedCompanyName,
-            found: companyMap.get(normalizedCompanyName)
-          })
           const companyId = companyMap.get(normalizedCompanyName)
           if (companyId) {
             processedUser.company_id = companyId
-          } else {
-            console.log('Company not found in map')
           }
         }
 
@@ -410,11 +407,12 @@ export default function BulkUpsertPage() {
           }
         }
 
-        const existingUser = existingUserMap.get(userData.email.toLowerCase())
-        if (existingUser) {
+        // Only check for existing user if we have an email
+        if (userData.email && existingUserMap.get(userData.email.toLowerCase())) {
+          const existingUser = existingUserMap.get(userData.email.toLowerCase())
           usersToUpdate.push({
             ...processedUser,
-            id: existingUser.id
+            id: existingUser!.id
           })
         } else {
           usersToInsert.push(processedUser)

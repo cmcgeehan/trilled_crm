@@ -24,9 +24,11 @@ import { use } from "react"
 import Link from "next/link"
 import { calculateFollowUpDates } from "@/lib/utils"
 
-type UserStatus = Database['public']['Tables']['users']['Row']['status']
+
 type UserRole = Database['public']['Tables']['users']['Row']['role']
 type FollowUpType = 'email' | 'sms' | 'call' | 'meeting' | 'tour'
+
+type UserStatus = 'new' | 'needs_response' | 'awaiting_response' | 'follow_up' | 'won' | 'lost'
 
 type Customer = Database['public']['Tables']['users']['Row'] & {
   status: UserStatus;
@@ -103,7 +105,7 @@ export default function CustomerDetailPage({ params }: { params: Promise<{ id: s
   const [error, setError] = useState<string | null>(null)
   const [activeCase, setActiveCase] = useState<Case | null>(null)
   const [cases, setCases] = useState<Case[]>([])
-  const [responseChannel, setResponseChannel] = useState("email")
+  const [responseChannel, setResponseChannel] = useState("internal")
   const [responseMessage, setResponseMessage] = useState("")
   const [editedCustomer, setEditedCustomer] = useState<Customer | null>(null)
   const [isMarkingAsLost, setIsMarkingAsLost] = useState(false)
