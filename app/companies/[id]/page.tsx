@@ -26,6 +26,7 @@ type Company = Database['public']['Tables']['companies']['Row'] & {
   status?: string;
   type: CompanyType;
   notes?: string | null;
+  description?: string | null;
 }
 
 type CompanyType = 
@@ -180,6 +181,7 @@ export default function CompanyDetailsPage({ params }: { params: Promise<{ id: s
           postal_code: editedCompany.postal_code,
           country: editedCompany.country,
           notes: editedCompany.notes,
+          description: editedCompany.description,
         })
         .eq('id', id)
 
@@ -248,64 +250,114 @@ export default function CompanyDetailsPage({ params }: { params: Promise<{ id: s
         throw new Error('No active session found')
       }
 
-      // Get research results from AI
-      const researchResponse = await fetch('/api/companies/research', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${session.access_token}`
-        },
-        body: JSON.stringify({
-          companyName: company.name,
-          companyId: company.id,
-          requesterId: session.user.id
-        }),
-      })
+      // Create EventSource for research endpoint
+      const params = new URLSearchParams({
+        companyName: company.name || '',
+        companyId: company.id,
+        requesterId: session.user.id,
+        role: currentUserRole || 'agent' // Add role parameter
+      });
 
-      if (!researchResponse.ok) {
-        throw new Error('Failed to perform AI research')
-      }
+      // Create EventSource with authorization header
+      const eventSource = new EventSource(`/api/companies/research?${params.toString()}`, {
+        withCredentials: true
+      });
 
-      const researchData = await researchResponse.json()
-      
-      // Create user from research results
-      const createUserResponse = await fetch(`/api/research/users`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          companyId: company.id,
-          name: researchData.name,
-          email: researchData.email,
-          position: researchData.position,
-          ownerId: researchData.owner_id
-        }),
-      })
+      // Set up event handlers
+      eventSource.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          console.log('Received message:', data);
+        } catch (err) {
+          console.error('Error parsing message:', err);
+        }
+      };
 
-      if (!createUserResponse.ok) {
-        const errorText = await createUserResponse.text()
-        console.error('Create user error:', {
-          status: createUserResponse.status,
-          statusText: createUserResponse.statusText,
-          body: errorText
-        })
-        throw new Error('Failed to create user from research')
-      }
+      eventSource.addEventListener('ping', (event: MessageEvent) => {
+        try {
+          const data = JSON.parse(event.data);
+          console.log('Received ping:', data);
+        } catch (err) {
+          console.error('Error parsing ping:', err);
+        }
+      });
 
-      const newUser = await createUserResponse.json()
-      
-      // Update users list
-      setUsers(prev => [newUser, ...prev])
+      eventSource.addEventListener('complete', (event: MessageEvent) => {
+        try {
+          const researchData = JSON.parse(event.data);
+          console.log('Research complete:', researchData);
+          
+          if (researchData.status === 'success') {
+            let message = 'Research completed successfully.';
+            
+            // Update users list if a new user was created
+            if (researchData.user) {
+              setUsers(prev => [researchData.user, ...prev]);
+              message = 'Successfully created new lead from AI research';
+            }
 
-      // Show success message
-      alert('Successfully created new lead from AI research')
+            // Update company data if it was modified
+            if (researchData.company) {
+              setCompany(researchData.company);
+              setEditedCompany(researchData.company);
+              if (!researchData.user) {
+                message = 'Successfully updated company information';
+              }
+            }
+
+            // Show success message
+            alert(message);
+          } else {
+            console.error('Invalid research response:', researchData);
+            throw new Error(researchData.error || 'Research failed to return expected data');
+          }
+        } catch (err) {
+          console.error('Error handling complete event:', err);
+          alert('Error processing research results: ' + (err instanceof Error ? err.message : 'Unknown error'));
+        } finally {
+          eventSource.close();
+          setIsResearching(false);
+        }
+      });
+
+      eventSource.addEventListener('error', (event: MessageEvent) => {
+        console.error('Research error event:', event);
+        let errorMessage = 'Unknown error occurred';
+        
+        try {
+          if (event.data) {
+            const errorData = JSON.parse(event.data);
+            errorMessage = errorData.error || errorMessage;
+          }
+        } catch (e) {
+          console.error('Error parsing error data:', e);
+        }
+
+        alert('Failed to perform AI research: ' + errorMessage);
+        eventSource.close();
+        setIsResearching(false);
+      });
+
+      eventSource.onerror = (error) => {
+        console.error('EventSource connection error:', error);
+        eventSource.close();
+        setIsResearching(false);
+        alert('Failed to connect to research service. Please try again.');
+      };
+
+      // Add cleanup function
+      return () => {
+        if (eventSource) {
+          console.log('Cleaning up EventSource connection');
+          eventSource.close();
+          setIsResearching(false);
+        }
+      };
 
     } catch (err) {
-      console.error('Error performing AI research:', err)
-      alert('Failed to perform AI research: ' + (err instanceof Error ? err.message : 'Unknown error'))
-    } finally {
-      setIsResearching(false)
+      console.error('Error setting up AI research:', err);
+      alert('Failed to start AI research: ' + (err instanceof Error ? err.message : 'Unknown error'));
+      setIsResearching(false);
     }
   }
 
@@ -385,14 +437,17 @@ export default function CompanyDetailsPage({ params }: { params: Promise<{ id: s
           <CardTitle>Company Details</CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="space-y-4">
+          <div className="space-y-6">
             {!canEdit() && (
               <div className="bg-yellow-50 border border-yellow-200 text-yellow-800 px-4 py-3 rounded-md mb-4">
                 Only agents and admins can edit company details.
               </div>
             )}
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-4">
+
+            {/* Basic Information */}
+            <div className="space-y-4">
+              <h3 className="text-lg font-semibold">Basic Information</h3>
+              <div className="grid grid-cols-2 gap-4">
                 <div>
                   <Label htmlFor="name">Company Name</Label>
                   <Input
@@ -415,53 +470,58 @@ export default function CompanyDetailsPage({ params }: { params: Promise<{ id: s
                     disabled={!canEdit()}
                   />
                 </div>
-                <div>
-                  <Label htmlFor="type">Type</Label>
-                  <Select
-                    value={editedCompany.type || ''}
-                    onValueChange={handleTypeChange}
-                    disabled={!canEdit()}
-                  >
-                    <SelectTrigger id="type" className="mt-1">
-                      <SelectValue placeholder="Select type" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="aquatic_center">Aquatic Center</SelectItem>
-                      <SelectItem value="big_brother_big_sister">Big Brother, Big Sister</SelectItem>
-                      <SelectItem value="churches">Churches</SelectItem>
-                      <SelectItem value="community_center">Community Center</SelectItem>
-                      <SelectItem value="detox">Detox</SelectItem>
-                      <SelectItem value="doctors_office">Doctor&apos;s Office</SelectItem>
-                      <SelectItem value="emergency_medical_services">Emergency Medical Services</SelectItem>
-                      <SelectItem value="first_responders">First Responders</SelectItem>
-                      <SelectItem value="government_health_agencies">Government Health Agencies</SelectItem>
-                      <SelectItem value="health_foundations">Health Foundations</SelectItem>
-                      <SelectItem value="hospitals">Hospitals</SelectItem>
-                      <SelectItem value="insurance">Insurance</SelectItem>
-                      <SelectItem value="lawyers_legal_services">Lawyers & Legal Services</SelectItem>
-                      <SelectItem value="mental_health">Mental Health</SelectItem>
-                      <SelectItem value="mental_health_inpatient">Mental Health Inpatient</SelectItem>
-                      <SelectItem value="occupational_health">Occupational Health Providers</SelectItem>
-                      <SelectItem value="personal_life_coach">Personal Life Coach</SelectItem>
-                      <SelectItem value="recovery_services">Recovery Services</SelectItem>
-                      <SelectItem value="rehab_center">Rehab Center</SelectItem>
-                      <SelectItem value="resources">Resources</SelectItem>
-                      <SelectItem value="rural_churches">Rural Areas Churches</SelectItem>
-                      <SelectItem value="rural_community_centers">Rural Areas Community Centers</SelectItem>
-                      <SelectItem value="rural_gp">Rural Areas GP</SelectItem>
-                      <SelectItem value="rural_ped_care">Rural Areas Ped Care</SelectItem>
-                      <SelectItem value="schools">Schools</SelectItem>
-                      <SelectItem value="sport_center">Sport Center</SelectItem>
-                      <SelectItem value="therapists">Therapists</SelectItem>
-                      <SelectItem value="treatment_center">Treatment Center</SelectItem>
-                      <SelectItem value="veterans_services">Veterans Services</SelectItem>
-                      <SelectItem value="wellness_fitness">Wellness & Fitness Companies</SelectItem>
-                      <SelectItem value="ymca">YMCA</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
               </div>
-              <div className="space-y-4">
+              <div>
+                <Label htmlFor="type">Type</Label>
+                <Select
+                  value={editedCompany.type || ''}
+                  onValueChange={handleTypeChange}
+                  disabled={!canEdit()}
+                >
+                  <SelectTrigger id="type" className="mt-1">
+                    <SelectValue placeholder="Select type" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="aquatic_center">Aquatic Center</SelectItem>
+                    <SelectItem value="big_brother_big_sister">Big Brother, Big Sister</SelectItem>
+                    <SelectItem value="churches">Churches</SelectItem>
+                    <SelectItem value="community_center">Community Center</SelectItem>
+                    <SelectItem value="detox">Detox</SelectItem>
+                    <SelectItem value="doctors_office">Doctor&apos;s Office</SelectItem>
+                    <SelectItem value="emergency_medical_services">Emergency Medical Services</SelectItem>
+                    <SelectItem value="first_responders">First Responders</SelectItem>
+                    <SelectItem value="government_health_agencies">Government Health Agencies</SelectItem>
+                    <SelectItem value="health_foundations">Health Foundations</SelectItem>
+                    <SelectItem value="hospitals">Hospitals</SelectItem>
+                    <SelectItem value="insurance">Insurance</SelectItem>
+                    <SelectItem value="lawyers_legal_services">Lawyers & Legal Services</SelectItem>
+                    <SelectItem value="mental_health">Mental Health</SelectItem>
+                    <SelectItem value="mental_health_inpatient">Mental Health Inpatient</SelectItem>
+                    <SelectItem value="occupational_health">Occupational Health Providers</SelectItem>
+                    <SelectItem value="personal_life_coach">Personal Life Coach</SelectItem>
+                    <SelectItem value="recovery_services">Recovery Services</SelectItem>
+                    <SelectItem value="rehab_center">Rehab Center</SelectItem>
+                    <SelectItem value="resources">Resources</SelectItem>
+                    <SelectItem value="rural_churches">Rural Areas Churches</SelectItem>
+                    <SelectItem value="rural_community_centers">Rural Areas Community Centers</SelectItem>
+                    <SelectItem value="rural_gp">Rural Areas GP</SelectItem>
+                    <SelectItem value="rural_ped_care">Rural Areas Ped Care</SelectItem>
+                    <SelectItem value="schools">Schools</SelectItem>
+                    <SelectItem value="sport_center">Sport Center</SelectItem>
+                    <SelectItem value="therapists">Therapists</SelectItem>
+                    <SelectItem value="treatment_center">Treatment Center</SelectItem>
+                    <SelectItem value="veterans_services">Veterans Services</SelectItem>
+                    <SelectItem value="wellness_fitness">Wellness & Fitness Companies</SelectItem>
+                    <SelectItem value="ymca">YMCA</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+
+            {/* Address Information */}
+            <div className="space-y-4">
+              <h3 className="text-lg font-semibold">Address Information</h3>
+              <div className="grid grid-cols-2 gap-4">
                 <div>
                   <Label htmlFor="street_address">Street Address</Label>
                   <Input
@@ -522,21 +582,38 @@ export default function CompanyDetailsPage({ params }: { params: Promise<{ id: s
                     disabled={!canEdit()}
                   />
                 </div>
-                <div>
-                  <Label htmlFor="notes">Notes</Label>
-                  <textarea
-                    id="notes"
-                    value={editedCompany.notes || ''}
-                    onChange={(e) => setEditedCompany(prev => ({ ...prev!, notes: e.target.value }))}
-                    className="flex min-h-[80px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
-                    placeholder="Add notes about this company..."
-                    disabled={!canEdit()}
-                  />
-                </div>
               </div>
             </div>
+
+            {/* Additional Details */}
+            <div className="space-y-4">
+              <h3 className="text-lg font-semibold">Additional Details</h3>
+              <div>
+                <Label htmlFor="description">Description</Label>
+                <textarea
+                  id="description"
+                  value={editedCompany?.description || ''}
+                  onChange={(e) => setEditedCompany(prev => ({ ...prev!, description: e.target.value }))}
+                  className="flex min-h-[120px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                  placeholder="Company description..."
+                  disabled={!canEdit()}
+                />
+              </div>
+              <div>
+                <Label htmlFor="notes">Notes</Label>
+                <textarea
+                  id="notes"
+                  value={editedCompany?.notes || ''}
+                  onChange={(e) => setEditedCompany(prev => ({ ...prev!, notes: e.target.value }))}
+                  className="flex min-h-[80px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                  placeholder="Add notes about this company..."
+                  disabled={!canEdit()}
+                />
+              </div>
+            </div>
+
             {canEdit() && (
-              <div className="flex justify-end space-x-2 mt-4">
+              <div className="flex justify-end space-x-2 mt-6">
                 <Button variant="outline" onClick={() => setEditedCompany(company)}>
                   Reset Changes
                 </Button>
