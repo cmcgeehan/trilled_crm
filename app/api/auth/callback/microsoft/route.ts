@@ -187,7 +187,7 @@ export async function GET(request: NextRequest) {
           email: userInfo.mail || userInfo.userPrincipalName,
           deleted_at: null // Ensure we match the unique constraint
         }, {
-          onConflict: 'email_integrations_user_id_provider_email_key'
+          onConflict: 'user_id,provider,email'
         })
 
       if (integrationError) {
