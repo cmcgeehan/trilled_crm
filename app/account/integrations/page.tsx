@@ -23,8 +23,6 @@ type IntegrationProvider = {
 }
 
 const integrationProviders: IntegrationProvider[] = [
-  { name: "Microsoft Outlook", type: "email", icon: "microsoft", connected: false },
-  { name: "Gmail", type: "email", icon: "google", connected: false },
   { name: "Microsoft Teams", type: "phone", icon: "microsoft", connected: false },
   { name: "Dialpad", type: "phone", icon: "phone", connected: false },
   { name: "Twilio", type: "phone", icon: "phone", connected: false },
@@ -177,8 +175,18 @@ export default function IntegrationsPage() {
 
   return (
     <div className="space-y-6">
-      <h1 className="text-3xl font-bold">Integrations</h1>
-      {renderIntegrationSection("email")}
+      <h1 className="text-3xl font-bold">Phone & SMS Integrations</h1>
+      
+      <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6">
+        <p className="text-blue-700">
+          Looking for email integrations? Visit the{" "}
+          <a href="/settings/integrations" className="font-medium underline">
+            Email Integrations page
+          </a>
+          {" "}to connect your Gmail or Outlook account.
+        </p>
+      </div>
+
       {renderIntegrationSection("phone")}
       {renderIntegrationSection("sms")}
     </div>
