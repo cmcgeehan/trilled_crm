@@ -32,6 +32,7 @@ type Company = Database['public']['Tables']['companies']['Row'] & {
   type: CompanyType;
   notes?: string | null;
   description?: string | null;
+  organization_id: string;
 }
 
 type CompanyType = 
@@ -92,7 +93,7 @@ export default function CompanyDetailsPage() {
         // Load company details
         let query = supabase
           .from('companies')
-          .select('*')
+          .select('*, organization_id')
           .eq('id', id)
 
         // Apply organization filter for non-super admins
@@ -220,21 +221,38 @@ export default function CompanyDetailsPage() {
       setIsDeleting(true)
       setDeleteError(null)
 
-      const { error: deleteError } = await supabase
+      console.log('Starting delete for company:', company.id)
+
+      // First verify we can access this company
+      const { data: companyCheck, error: checkError } = await supabase
         .from('companies')
-        .update({
-          deleted_at: new Date().toISOString(),
-        })
+        .select('id')
         .eq('id', id)
+        .is('deleted_at', null)
+        .single()
 
-      if (deleteError) throw deleteError
+      if (checkError) {
+        throw new Error('Could not verify company access')
+      }
 
-      setCompany(null)
-      setEditedCompany(null)
-      setUsers([])
+      if (!companyCheck) {
+        throw new Error('Company not found or already deleted')
+      }
+
+      // Perform soft delete - just set deleted_at
+      const { error } = await supabase
+        .from('companies')
+        .update({ deleted_at: new Date().toISOString() })
+        .eq('id', id)
+        .is('deleted_at', null)
+
+      if (error) throw error
+
+      console.log('Successfully deleted company:', id)
+      router.push('/companies')
     } catch (err) {
+      console.error('Delete error:', err)
       setDeleteError(err instanceof Error ? err.message : 'Failed to delete company')
-      console.error('Error deleting company:', err)
     } finally {
       setIsDeleting(false)
     }

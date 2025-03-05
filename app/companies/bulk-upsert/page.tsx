@@ -194,11 +194,11 @@ export default function BulkUpsertPage() {
       }
 
       // Check for duplicate company names in the CSV
-      const companyNames = companiesToProcess
+      const companyNamesInCsv = companiesToProcess
         .map(c => c.name)
         .filter((name): name is string => typeof name === 'string')
-      const duplicates = companyNames.filter((name, index) => 
-        companyNames.indexOf(name) !== index
+      const duplicates = companyNamesInCsv.filter((name, index) => 
+        companyNamesInCsv.indexOf(name) !== index
       )
       if (duplicates.length > 0) {
         validationErrors.push({
@@ -214,12 +214,18 @@ export default function BulkUpsertPage() {
         return
       }
 
+      // Get the current session for the user ID
+      const { data: { session } } = await supabase.auth.getSession()
+      if (!session) {
+        throw new Error('No active session')
+      }
+
       // Process all valid companies
       // First, get all existing companies in one query
       let existingCompaniesQuery = supabase
         .from('companies')
         .select('id, name')
-        .in('name', companyNames)
+        .in('name', companyNamesInCsv)
         .is('deleted_at', null)
 
       if (currentUserRole === 'admin' && currentOrganizationId) {
@@ -276,16 +282,6 @@ export default function BulkUpsertPage() {
         }
       })
 
-      // Process updates in batches of 50
-      for (let i = 0; i < companiesToUpdate.length; i += 50) {
-        const batch = companiesToUpdate.slice(i, i + 50)
-        const { error: updateError } = await supabase
-          .from('companies')
-          .upsert(batch)
-
-        if (updateError) throw updateError
-      }
-
       // Process inserts in batches of 50
       for (let i = 0; i < companiesToInsert.length; i += 50) {
         const batch = companiesToInsert.slice(i, i + 50)
@@ -296,13 +292,68 @@ export default function BulkUpsertPage() {
         if (insertError) throw insertError
       }
 
+      // Process updates in batches of 50
+      for (let i = 0; i < companiesToUpdate.length; i += 50) {
+        const batch = companiesToUpdate.slice(i, i + 50)
+        const { error: updateError } = await supabase
+          .from('companies')
+          .upsert(batch)
+
+        if (updateError) throw updateError
+      }
+
+      // After all companies are created/updated, get their IDs for research
+      const allCompanyNames = [...companiesToInsert, ...companiesToUpdate].map(c => c.name)
+      const { data: createdCompanies, error: fetchError } = await supabase
+        .from('companies')
+        .select('id, name')
+        .in('name', allCompanyNames)
+        .is('deleted_at', null)
+
+      if (fetchError) {
+        console.error('Error fetching created companies:', fetchError)
+        throw new Error('Failed to fetch created companies')
+      }
+
+      // Trigger batch research for all companies
+      if (createdCompanies && createdCompanies.length > 0) {
+        try {
+          const response = await fetch('/api/companies/batch-research', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              companies: createdCompanies,
+              requesterId: session.user.id
+            })
+          })
+
+          if (!response.ok) {
+            const errorText = await response.text()
+            console.error('Batch research error:', {
+              status: response.status,
+              statusText: response.statusText,
+              body: errorText
+            })
+            // Don't throw here - we want to continue even if research fails
+          } else {
+            const result = await response.json()
+            console.log('Batch research results:', result)
+          }
+        } catch (error) {
+          console.error('Error triggering batch research:', error)
+          // Don't throw here - we want to continue even if research fails
+        }
+      }
+
       setSuccess(true)
       setTimeout(() => {
         router.push('/companies')
       }, 2000)
-    } catch (err) {
-      console.error('Error processing CSV:', err)
-      setError(err instanceof Error ? err.message : 'Error processing CSV file')
+    } catch (error) {
+      console.error('Error processing CSV:', error)
+      setError(error instanceof Error ? error.message : 'Error processing CSV file')
     } finally {
       setLoading(false)
     }

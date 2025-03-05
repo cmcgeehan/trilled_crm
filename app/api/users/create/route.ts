@@ -98,7 +98,7 @@ export async function POST(request: Request) {
       id: userData.id,
       first_name: userData.first_name,
       last_name: userData.last_name,
-      email: userData.email,
+      email: userData.email === '' ? null : userData.email,
       phone: userData.phone,
       position: userData.position,
       role: userData.role,

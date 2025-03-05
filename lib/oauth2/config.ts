@@ -19,13 +19,15 @@ export const OUTLOOK_CONFIG = {
   clientSecret: process.env.MICROSOFT_CLIENT_SECRET!,
   redirectUri: process.env.MICROSOFT_REDIRECT_URI!,
   scopes: [
+    'openid',
     'offline_access',
-    'https://graph.microsoft.com/Mail.Send',
-    'https://graph.microsoft.com/Mail.ReadWrite',
-    'https://graph.microsoft.com/User.Read',
-    'https://graph.microsoft.com/email'
+    'profile',
+    'User.Read',
+    'Mail.Read',
+    'Mail.ReadWrite',
+    'Mail.Send'
   ],
-  authority: 'https://login.microsoftonline.com/common'
+  authority: 'https://login.microsoftonline.com/organizations'
 }
 
 // Create Gmail OAuth2 client
@@ -54,7 +56,8 @@ export const getOutlookAuthUrl = () => {
     response_type: 'code',
     redirect_uri: OUTLOOK_CONFIG.redirectUri,
     scope: OUTLOOK_CONFIG.scopes.join(' '),
-    response_mode: 'query'
+    response_mode: 'query',
+    prompt: 'consent'
   })
 
   return `${OUTLOOK_CONFIG.authority}/oauth2/v2.0/authorize?${params.toString()}`

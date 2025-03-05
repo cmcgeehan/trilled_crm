@@ -5,6 +5,9 @@ DROP POLICY IF EXISTS "companies_access_policy" ON companies;
 DROP POLICY IF EXISTS "Organization based company access" ON companies;
 DROP POLICY IF EXISTS "Everyone can view companies" ON companies;
 DROP POLICY IF EXISTS "Admins can manage companies" ON companies;
+DROP POLICY IF EXISTS "companies_delete" ON companies;
+DROP POLICY IF EXISTS "companies_update" ON companies;
+DROP POLICY IF EXISTS "companies_select" ON companies;
 
 -- Create new policies for companies table
 CREATE POLICY "companies_select" ON companies
@@ -53,23 +56,8 @@ CREATE POLICY "companies_update" ON companies
             AND (
                 users.role = 'super_admin'
                 OR (
-                    users.role = 'admin'
+                    users.role IN ('admin', 'agent')
                     AND users.organization_id = companies.organization_id
-                )
-            )
-        )
-    )
-    WITH CHECK (
-        organization_id IS NOT NULL
-        AND EXISTS (
-            SELECT 1 FROM users
-            WHERE users.id = auth.uid()
-            AND users.deleted_at IS NULL
-            AND (
-                users.role = 'super_admin'
-                OR (
-                    users.role = 'admin'
-                    AND users.organization_id = organization_id
                 )
             )
         )
