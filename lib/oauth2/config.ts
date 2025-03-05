@@ -30,6 +30,16 @@ export const OUTLOOK_CONFIG = {
   authority: 'https://login.microsoftonline.com/organizations'
 }
 
+// Validate Outlook config
+if (!process.env.MICROSOFT_CLIENT_ID || !process.env.MICROSOFT_CLIENT_SECRET) {
+  console.error('Missing Microsoft credentials:', {
+    hasClientId: !!process.env.MICROSOFT_CLIENT_ID,
+    clientIdLength: process.env.MICROSOFT_CLIENT_ID?.length || 0,
+    hasClientSecret: !!process.env.MICROSOFT_CLIENT_SECRET,
+    clientSecretLength: process.env.MICROSOFT_CLIENT_SECRET?.length || 0
+  })
+}
+
 // Create Gmail OAuth2 client
 export const createGmailOAuth2Client = () => {
   return new OAuth2Client(
