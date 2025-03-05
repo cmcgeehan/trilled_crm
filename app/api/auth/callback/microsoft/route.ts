@@ -176,23 +176,50 @@ export async function GET(request: NextRequest) {
       }
 
       // Store integration in database
-      const { error: integrationError } = await supabase
+      // First try to find an existing integration
+      const { data: existingIntegration } = await supabase
         .from('email_integrations')
-        .upsert({
-          user_id: session.user.id,
-          provider: 'outlook',
-          refresh_token: '', // MSAL handles token refresh internally
-          access_token: tokenResponse.accessToken,
-          token_expires_at: tokenResponse.expiresOn?.toISOString() || null,
-          email: userInfo.mail || userInfo.userPrincipalName,
-          deleted_at: null // Ensure we match the unique constraint
-        }, {
-          onConflict: 'user_id,provider,email'
-        })
+        .select('id')
+        .eq('user_id', session.user.id)
+        .eq('provider', 'outlook')
+        .eq('email', userInfo.mail || userInfo.userPrincipalName)
+        .is('deleted_at', null)
+        .single()
 
-      if (integrationError) {
-        console.error('Integration error:', integrationError)
-        throw integrationError
+      if (existingIntegration) {
+        // Update existing integration
+        const { error: updateError } = await supabase
+          .from('email_integrations')
+          .update({
+            refresh_token: '', // MSAL handles token refresh internally
+            access_token: tokenResponse.accessToken,
+            token_expires_at: tokenResponse.expiresOn?.toISOString() || null,
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', existingIntegration.id)
+
+        if (updateError) {
+          console.error('Integration update error:', updateError)
+          throw updateError
+        }
+      } else {
+        // Insert new integration
+        const { error: insertError } = await supabase
+          .from('email_integrations')
+          .insert({
+            user_id: session.user.id,
+            provider: 'outlook',
+            refresh_token: '', // MSAL handles token refresh internally
+            access_token: tokenResponse.accessToken,
+            token_expires_at: tokenResponse.expiresOn?.toISOString() || null,
+            email: userInfo.mail || userInfo.userPrincipalName,
+            deleted_at: null
+          })
+
+        if (insertError) {
+          console.error('Integration insert error:', insertError)
+          throw insertError
+        }
       }
 
       // Redirect back to integrations page with success
