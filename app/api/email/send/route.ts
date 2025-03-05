@@ -8,6 +8,8 @@ export const dynamic = 'force-dynamic'
 
 export async function POST(request: NextRequest) {
   try {
+    console.log('Starting email send request...')
+    
     // Get Supabase client
     const cookieStore = cookies()
     const supabase = createRouteHandlerClient({ cookies: () => cookieStore })
@@ -15,16 +17,20 @@ export async function POST(request: NextRequest) {
     // Get current user from auth header
     const authHeader = request.headers.get('Authorization')
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      console.error('Missing or invalid authorization header:', { authHeader })
       return NextResponse.json({ error: 'Missing or invalid authorization header' }, { status: 401 })
     }
 
     const token = authHeader.split(' ')[1]
+    console.log('Authenticating user with token...')
     const { data: { user }, error: authError } = await supabase.auth.getUser(token)
     
     if (authError || !user) {
-      console.error('Auth error:', authError)
+      console.error('Auth error:', { authError, hasUser: !!user })
       return NextResponse.json({ error: 'Invalid authentication token' }, { status: 401 })
     }
+
+    console.log('User authenticated:', { userId: user.id })
 
     // Parse request body
     const body = await request.json()
@@ -38,10 +44,22 @@ export async function POST(request: NextRequest) {
     })
 
     if (!to || !subject || !content) {
-      throw new Error(`Missing required fields: ${!to ? 'to' : ''} ${!subject ? 'subject' : ''} ${!content ? 'content' : ''}`.trim())
+      const missingFields = {
+        to: !to,
+        subject: !subject,
+        content: !content
+      }
+      console.error('Missing required fields:', missingFields)
+      return NextResponse.json({ 
+        error: `Missing required fields: ${Object.entries(missingFields)
+          .filter(entry => entry[1])
+          .map(entry => entry[0])
+          .join(', ')}`
+      }, { status: 400 })
     }
 
     // Get the user's email integration
+    console.log('Fetching email integration...')
     const { data: integrations, error: integrationError } = await supabase
       .from('email_integrations')
       .select('*')
@@ -51,11 +69,16 @@ export async function POST(request: NextRequest) {
 
     if (integrationError) {
       console.error('Integration query error:', integrationError)
-      throw new Error(`Failed to fetch email integration: ${integrationError.message}`)
+      return NextResponse.json({ 
+        error: `Failed to fetch email integration: ${integrationError.message}` 
+      }, { status: 500 })
     }
 
     if (!integrations || integrations.length === 0) {
-      throw new Error('No email integration found - please connect your email account first')
+      console.error('No email integration found for user:', user.id)
+      return NextResponse.json({ 
+        error: 'No email integration found - please connect your email account first' 
+      }, { status: 404 })
     }
 
     // Use the most recently created integration
@@ -65,11 +88,13 @@ export async function POST(request: NextRequest) {
       provider: integration.provider,
       email: integration.email,
       hasAccessToken: !!integration.access_token,
+      hasRefreshToken: !!integration.refresh_token,
       tokenExpiresAt: integration.token_expires_at
     })
 
     try {
       // Send the email
+      console.log('Attempting to send email...')
       const result = await sendEmail(
         integration,
         to,
@@ -78,13 +103,13 @@ export async function POST(request: NextRequest) {
       )
 
       console.log('Email sent successfully:', result)
-
       return NextResponse.json({ success: true, result })
     } catch (emailError) {
-      console.error('Error sending email:', emailError)
-      const errorMessage = emailError instanceof Error 
-        ? emailError.message 
-        : 'Failed to send email through provider'
+      console.error('Error sending email:', {
+        error: emailError,
+        message: emailError instanceof Error ? emailError.message : 'Unknown error',
+        stack: emailError instanceof Error ? emailError.stack : undefined
+      })
       
       // Check for specific error types
       if (emailError instanceof Error) {
@@ -110,30 +135,27 @@ export async function POST(request: NextRequest) {
 
       // Return a detailed error response for other errors
       return NextResponse.json(
-        { error: errorMessage },
+        { 
+          error: emailError instanceof Error ? emailError.message : 'Failed to send email',
+          details: emailError instanceof Error ? emailError.stack : undefined
+        },
         { status: 500 }
       )
     }
   } catch (error) {
-    console.error('Error in email sending endpoint:', {
+    console.error('Unhandled error in email sending endpoint:', {
       error,
       message: error instanceof Error ? error.message : 'Unknown error',
       stack: error instanceof Error ? error.stack : undefined
     })
 
     // Return a more detailed error response
-    const errorMessage = error instanceof Error ? error.message : 'Failed to send email'
-    const errorDetails = error instanceof Error ? error.stack : undefined
-    const status = errorMessage.includes('needs to be reconnected') || errorMessage.includes('token has expired')
-      ? 401
-      : 500
-
     return NextResponse.json(
       { 
-        error: errorMessage,
-        details: errorDetails
+        error: error instanceof Error ? error.message : 'Failed to send email',
+        details: error instanceof Error ? error.stack : undefined
       },
-      { status }
+      { status: 500 }
     )
   }
 } 

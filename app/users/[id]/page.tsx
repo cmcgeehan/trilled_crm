@@ -503,7 +503,9 @@ export default function CustomerDetailPage({ params }: { params: Promise<{ id: s
           }
 
           // Send email via API endpoint
-          const response = await fetch('/api/email/send', {
+          const apiUrl = 'https://trilled-crm-git-main-cmcgeehans-projects.vercel.app/api/email/send'
+
+          const response = await fetch(apiUrl, {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
@@ -519,7 +521,12 @@ export default function CustomerDetailPage({ params }: { params: Promise<{ id: s
           const data = await response.json()
           
           if (!response.ok) {
-            console.error('Error sending email:', data)
+            console.error('Error sending email:', {
+              status: response.status,
+              statusText: response.statusText,
+              data,
+              url: apiUrl
+            })
             if (data.error?.includes('needs to be reconnected') || data.error?.includes('token has expired')) {
               setError(
                 <div className="text-red-500 space-y-2">
@@ -534,7 +541,7 @@ export default function CustomerDetailPage({ params }: { params: Promise<{ id: s
                 </div>
               )
             } else {
-              throw new Error(data.error || 'Failed to send email')
+              throw new Error(data.error || `Failed to send email: ${response.status} ${response.statusText}`)
             }
             return
           }
@@ -575,7 +582,6 @@ export default function CustomerDetailPage({ params }: { params: Promise<{ id: s
         } catch (emailError) {
           console.error('Error sending email:', emailError)
           setError(emailError instanceof Error ? emailError.message : 'Failed to send email')
-          return
         }
       } else {
         console.log(`Sending ${responseChannel} response: ${responseMessage}`)
