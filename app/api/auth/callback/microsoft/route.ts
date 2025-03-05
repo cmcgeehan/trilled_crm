@@ -19,6 +19,14 @@ interface MSALError extends Error {
   response?: unknown;
 }
 
+// Define proper type for MSAL token response
+interface ExtendedAuthenticationResult extends msal.AuthenticationResult {
+  response?: {
+    refresh_token?: string;
+  };
+  refreshToken?: string;
+}
+
 export async function GET(request: NextRequest) {
   try {
     // Log all environment variables we care about (excluding secrets)
@@ -138,15 +146,62 @@ export async function GET(request: NextRequest) {
     try {
       const tokenResponse = await cca.acquireTokenByCode({
         code,
-        scopes: OUTLOOK_CONFIG.scopes,
-        redirectUri: OUTLOOK_CONFIG.redirectUri
-      })
+        scopes: [...OUTLOOK_CONFIG.scopes, 'offline_access'],
+        redirectUri: OUTLOOK_CONFIG.redirectUri,
+        tokenQueryParameters: {
+          prompt: 'consent',
+          access_type: 'offline'
+        }
+      }) as ExtendedAuthenticationResult
 
       if (!tokenResponse) {
         throw new Error('Failed to get tokens - no response')
       }
 
-      console.log('Token exchange successful')
+      // Log the full token response (excluding sensitive data)
+      console.log('Token response structure:', {
+        hasAccessToken: !!tokenResponse.accessToken,
+        accessTokenLength: tokenResponse.accessToken?.length,
+        hasAccount: !!tokenResponse.account,
+        accountInfo: tokenResponse.account ? {
+          homeAccountId: tokenResponse.account.homeAccountId,
+          environment: tokenResponse.account.environment,
+          tenantId: tokenResponse.account.tenantId,
+        } : null,
+        scopes: tokenResponse.scopes,
+        expiresOn: tokenResponse.expiresOn,
+        tokenType: tokenResponse.tokenType,
+        responseProperties: Object.keys(tokenResponse),
+      })
+
+      // Get the refresh token from the response
+      let refreshToken = ''
+      
+      // Try different known properties where the refresh token might be
+      if (tokenResponse.refreshToken) {
+        refreshToken = tokenResponse.refreshToken
+      } else if (tokenResponse.response?.refresh_token) {
+        refreshToken = tokenResponse.response.refresh_token
+      } else if (tokenResponse.account?.homeAccountId) {
+        // Use the homeAccountId as a fallback
+        refreshToken = tokenResponse.account.homeAccountId
+      }
+
+      if (!refreshToken) {
+        console.error('Failed to get refresh token from response:', {
+          hasRefreshToken: !!tokenResponse.refreshToken,
+          hasResponseRefreshToken: !!tokenResponse.response?.refresh_token,
+          hasHomeAccountId: !!tokenResponse.account?.homeAccountId
+        })
+        throw new Error('No refresh token received from Microsoft - please try again')
+      }
+
+      console.log('Token exchange successful:', {
+        hasAccessToken: !!tokenResponse.accessToken,
+        hasRefreshToken: !!refreshToken,
+        refreshTokenLength: refreshToken.length,
+        expiresOn: tokenResponse.expiresOn
+      })
       
       // Get user info
       console.log('Getting user info from Graph API...')
@@ -191,7 +246,7 @@ export async function GET(request: NextRequest) {
         const { error: updateError } = await supabase
           .from('email_integrations')
           .update({
-            refresh_token: '', // MSAL handles token refresh internally
+            refresh_token: refreshToken,
             access_token: tokenResponse.accessToken,
             token_expires_at: tokenResponse.expiresOn?.toISOString() || null,
             updated_at: new Date().toISOString()
@@ -209,7 +264,7 @@ export async function GET(request: NextRequest) {
           .insert({
             user_id: session.user.id,
             provider: 'outlook',
-            refresh_token: '', // MSAL handles token refresh internally
+            refresh_token: refreshToken,
             access_token: tokenResponse.accessToken,
             token_expires_at: tokenResponse.expiresOn?.toISOString() || null,
             email: userInfo.mail || userInfo.userPrincipalName,

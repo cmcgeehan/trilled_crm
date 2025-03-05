@@ -235,7 +235,7 @@ export function NavBar() {
                 <DropdownMenuLabel>{userEmail}</DropdownMenuLabel>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem asChild>
-                  <Link href="/account/integrations">Integrations</Link>
+                  <Link href="/settings/integrations">Integrations</Link>
                 </DropdownMenuItem>
                 <DropdownMenuItem onClick={handleSignOut}>
                   Log out

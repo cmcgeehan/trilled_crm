@@ -1,7 +1,8 @@
 "use client"
 
-import { useState, useEffect, useRef, useCallback } from "react"
+import { useState, useEffect, useRef, useCallback, use } from "react"
 import { useSearchParams, useRouter } from "next/navigation"
+import Link from "next/link"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Button } from "@/components/ui/button"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
@@ -20,10 +21,7 @@ import { Calendar as CalendarComponent } from "@/components/ui/calendar"
 import { Checkbox } from "@/components/ui/checkbox"
 import { supabase } from "@/lib/supabase" 
 import { Database } from "@/types/supabase"
-import { use } from "react"
-import Link from "next/link"
 import { calculateFollowUpDates } from "@/lib/utils"
-
 
 type UserRole = Database['public']['Tables']['users']['Row']['role']
 type FollowUpType = 'email' | 'sms' | 'call' | 'meeting' | 'tour'
@@ -102,7 +100,7 @@ export default function CustomerDetailPage({ params }: { params: Promise<{ id: s
   const [activeTab, setActiveTab] = useState("cases")
   const [customer, setCustomer] = useState<Customer | null>(null)
   const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
+  const [error, setError] = useState<string | React.ReactNode | null>(null)
   const [activeCase, setActiveCase] = useState<Case | null>(null)
   const [cases, setCases] = useState<Case[]>([])
   const [responseChannel, setResponseChannel] = useState("internal")
@@ -470,13 +468,121 @@ export default function CustomerDetailPage({ params }: { params: Promise<{ id: s
             interactions: [...prev.interactions, newInteraction]
           } : null)
         }
+
+        // Clear the message after successful send
+        setResponseMessage("")
+      } else if (responseChannel === "email") {
+        try {
+          // First check if we have an email integration
+          const { data: integrations, error: integrationError } = await supabase
+            .from('email_integrations')
+            .select('*')
+            .eq('user_id', session.user.id)
+            .is('deleted_at', null)
+            .order('created_at', { ascending: false })
+
+          if (integrationError) {
+            throw new Error(`Failed to check email integration: ${integrationError.message}`)
+          }
+
+          if (!integrations || integrations.length === 0) {
+            // Show a more helpful error message with a link to set up email
+            setError(
+              <div className="text-red-500 space-y-2">
+                <span className="block">No email integration found.</span>
+                <span className="block">
+                  Please{' '}
+                  <Link href="/settings/integrations" className="text-blue-600 hover:underline">
+                    set up your email integration in Settings
+                  </Link>
+                  {' '}before sending emails.
+                </span>
+              </div>
+            )
+            return
+          }
+
+          // Send email via API endpoint
+          const response = await fetch('/api/email/send', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${session.access_token}`
+            },
+            body: JSON.stringify({
+              to: customer.email,
+              subject: `Re: Case #${activeCase?.id || 'New'}`,
+              content: responseMessage.trim()
+            })
+          })
+
+          const data = await response.json()
+          
+          if (!response.ok) {
+            console.error('Error sending email:', data)
+            if (data.error?.includes('needs to be reconnected') || data.error?.includes('token has expired')) {
+              setError(
+                <div className="text-red-500 space-y-2">
+                  <span className="block">{data.error}</span>
+                  <span className="block">
+                    Please{' '}
+                    <Link href="/settings/integrations" className="text-blue-600 hover:underline">
+                      reconnect your email integration in Settings
+                    </Link>
+                    {' '}to continue sending emails.
+                  </span>
+                </div>
+              )
+            } else {
+              throw new Error(data.error || 'Failed to send email')
+            }
+            return
+          }
+
+          // Record the communication
+          const { error: commError } = await supabase
+            .from('communications')
+            .insert({
+              direction: 'outbound',
+              to_address: customer.email || '',
+              from_address: session.user.email || '',
+              content: responseMessage.trim(),
+              agent_id: session.user.id,
+              user_id: customer.id,
+              delivered_at: new Date().toISOString()
+            })
+
+          if (commError) throw commError
+
+          // Update the UI
+          if (activeCase) {
+            const newInteraction: Interaction = {
+              type: 'email',
+              date: format(new Date(), 'MMM d, yyyy h:mm a'),
+              content: responseMessage.trim(),
+              sender: 'agent',
+              agentName: session.user.email || ''
+            }
+
+            setActiveCase(prev => prev ? {
+              ...prev,
+              interactions: [...prev.interactions, newInteraction]
+            } : null)
+          }
+
+          // Clear the message only after successful send
+          setResponseMessage("")
+        } catch (emailError) {
+          console.error('Error sending email:', emailError)
+          setError(emailError instanceof Error ? emailError.message : 'Failed to send email')
+          return
+        }
       } else {
         console.log(`Sending ${responseChannel} response: ${responseMessage}`)
       }
-
-      setResponseMessage("")
-    } catch (err) {
-      console.error('Error sending response:', err)
+    } catch (error) {
+      console.error('Error sending response:', error)
+      setError(error instanceof Error ? error.message : 'Failed to send response')
     }
   }
 
@@ -815,7 +921,7 @@ export default function CustomerDetailPage({ params }: { params: Promise<{ id: s
   if (error || !customer || !editedCustomer) {
     return (
       <div className="flex items-center justify-center min-h-screen">
-        <p className="text-red-500">Error: {error || 'Customer not found'}</p>
+        <div className="text-red-500">Error: {error || 'Customer not found'}</div>
       </div>
     )
   }
@@ -916,7 +1022,7 @@ export default function CustomerDetailPage({ params }: { params: Promise<{ id: s
                   This action cannot be undone. This will permanently delete the user and all associated follow-ups.
                 </p>
                 {deleteError && (
-                  <p className="text-red-500">{deleteError}</p>
+                  <div className="text-red-500">{deleteError}</div>
                 )}
                 <DialogFooter>
                   <Button variant="outline" onClick={() => setIsDeleting(false)}>
