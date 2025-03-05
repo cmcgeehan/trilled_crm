@@ -184,12 +184,14 @@ export async function GET(request: NextRequest) {
           refresh_token: '', // MSAL handles token refresh internally
           access_token: tokenResponse.accessToken,
           token_expires_at: tokenResponse.expiresOn?.toISOString() || null,
-          email: userInfo.mail || userInfo.userPrincipalName
+          email: userInfo.mail || userInfo.userPrincipalName,
+          deleted_at: null // Ensure we match the unique constraint
         }, {
-          onConflict: 'user_id,provider,email'
+          onConflict: 'email_integrations_user_id_provider_email_key'
         })
 
       if (integrationError) {
+        console.error('Integration error:', integrationError)
         throw integrationError
       }
 
