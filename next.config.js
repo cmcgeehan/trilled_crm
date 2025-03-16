@@ -8,6 +8,7 @@ const nextConfig = {
   images: {
     domains: ['localhost'],
   },
+  optimizeFonts: true,
 }
 
 module.exports = nextConfig 

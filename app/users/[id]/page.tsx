@@ -22,6 +22,7 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { supabase } from "@/lib/supabase" 
 import { Database } from "@/types/supabase"
 import { calculateFollowUpDates } from "@/lib/utils"
+import { CompanyCombobox } from "@/components/ui/company-combobox"
 
 type UserRole = Database['public']['Tables']['users']['Row']['role']
 type FollowUpType = 'email' | 'sms' | 'call' | 'meeting' | 'tour'
@@ -116,6 +117,7 @@ export default function CustomerDetailPage({ params }: { params: Promise<{ id: s
   const [isDeleting, setIsDeleting] = useState(false)
   const [deleteError, setDeleteError] = useState<string | null>(null)
   const [currentUserRole, setCurrentUserRole] = useState<UserRole | null>(null)
+  const [isEditable, setIsEditable] = useState<boolean>(false)
   const router = useRouter()
   const scrollContainerRef = useRef<HTMLDivElement>(null)
   const [companies, setCompanies] = useState<Database['public']['Tables']['companies']['Row'][]>([])
@@ -124,21 +126,53 @@ export default function CustomerDetailPage({ params }: { params: Promise<{ id: s
     try {
       console.log('Starting loadCompanies function...')
       
-      // Get all active companies
-      const { data: activeCompanies, error: companiesError } = await supabase
-        .from('companies')
-        .select('*')
-        .is('deleted_at', null)
-        .order('name');
+      let allCompanies: Database['public']['Tables']['companies']['Row'][] = [];
+      let lastId: string | null = null;
+      let hasMore = true;
       
-      console.log('Companies query result:', { activeCompanies, companiesError })
-      
-      if (companiesError) {
-        console.error('Error loading companies:', companiesError);
-        return;
+      while (hasMore) {
+        // Build query with pagination
+        let query = supabase
+          .from('companies')
+          .select('*')
+          .is('deleted_at', null)
+          .order('id', { ascending: true })
+          .limit(1000);
+        
+        // Add starting point for pagination if we have a last ID
+        if (lastId) {
+          query = query.gt('id', lastId);
+        }
+        
+        const { data: companies, error: companiesError } = await query;
+        
+        if (companiesError) {
+          console.error('Error loading companies:', companiesError);
+          return;
+        }
+        
+        if (!companies || companies.length === 0) {
+          hasMore = false;
+        } else {
+          allCompanies = [...allCompanies, ...companies];
+          lastId = companies[companies.length - 1].id;
+          hasMore = companies.length === 1000; // If we got 1000 results, there might be more
+        }
       }
+      
+      // Sort all companies by name after we have the complete set
+      allCompanies.sort((a, b) => {
+        const nameA = (a.name || '').toLowerCase();
+        const nameB = (b.name || '').toLowerCase();
+        return nameA.localeCompare(nameB);
+      });
 
-      setCompanies(activeCompanies || []);
+      // Debug: Log companies starting with 'z'
+      const zCompanies = allCompanies.filter(c => c.name?.toLowerCase().startsWith('z')) || [];
+      console.log('Companies starting with Z:', zCompanies);
+      console.log('Total number of companies:', allCompanies.length);
+      
+      setCompanies(allCompanies);
     } catch (err) {
       console.error('Error in loadCompanies:', err);
     }
@@ -233,6 +267,14 @@ export default function CustomerDetailPage({ params }: { params: Promise<{ id: s
       setCustomer(customer)
       setEditedCustomer(customer)
       
+      // Set editability based on loaded customer and current user role
+      if (currentUserRole) {
+        const canEditUser = 
+          currentUserRole === 'super_admin' || 
+          (customer.role === 'lead' || customer.role === 'customer');
+        setIsEditable(canEditUser);
+      }
+      
       // Load internal notes from communications
       const { data: communications, error: commsError } = await supabase
         .from('communications')
@@ -271,7 +313,7 @@ export default function CustomerDetailPage({ params }: { params: Promise<{ id: s
     } finally {
       setLoading(false)
     }
-  }, [id, loadFollowUps])
+  }, [id, loadFollowUps, currentUserRole])
 
   useEffect(() => {
     loadCustomer()
@@ -358,10 +400,11 @@ export default function CustomerDetailPage({ params }: { params: Promise<{ id: s
   useEffect(() => {
     const checkSession = async () => {
       try {
-        const { data: { session } } = await supabase.auth.getSession()
+        const { data: { session }, error: sessionError } = await supabase.auth.getSession()
+        if (sessionError) throw sessionError
+
         if (!session) {
-          console.log('No session found in dashboard, redirecting to login')
-          router.replace('/login')
+          router.push('/login')
           return
         }
 
@@ -374,28 +417,23 @@ export default function CustomerDetailPage({ params }: { params: Promise<{ id: s
 
         if (userError) throw userError
         if (userData) {
+          console.log('Current user role:', userData.role);
           setCurrentUserRole(userData.role as UserRole)
+          // Set editability based on role immediately
+          const canEditUser = userData.role === 'super_admin' || 
+            (customer?.role === 'lead' || customer?.role === 'customer')
+          console.log('Setting isEditable:', canEditUser, {
+            userRole: userData.role,
+            customerRole: customer?.role
+          });
+          setIsEditable(canEditUser)
         }
       } catch (err) {
         console.error('Error checking session:', err)
       }
     }
     checkSession()
-  }, [router])
-
-  // Function to check if editing is allowed
-  const canEdit = () => {
-    if (!customer || !currentUserRole) return false
-    
-    // Super admins can edit everything
-    if (currentUserRole === 'super_admin') return true
-    
-    // For leads and customers, anyone can edit
-    if (customer.role === 'lead' || customer.role === 'customer') return true
-    
-    // For other roles (agent, admin, super_admin), only super_admin can edit
-    return false
-  }
+  }, [router, customer])
 
   const loadAgents = async () => {
     try {
@@ -1224,7 +1262,7 @@ export default function CustomerDetailPage({ params }: { params: Promise<{ id: s
         </TabsList>
         <TabsContent value="info" className="p-6">
           <div className="space-y-4">
-            {!canEdit() && (
+            {!isEditable && (
               <div className="bg-yellow-50 border border-yellow-200 text-yellow-800 px-4 py-3 rounded-md mb-4">
                 Only super admins can edit details for agents and admins.
               </div>
@@ -1242,7 +1280,7 @@ export default function CustomerDetailPage({ params }: { params: Promise<{ id: s
                         value={editedCustomer?.first_name || ''}
                         onChange={(e) => setEditedCustomer(prev => ({ ...prev!, first_name: e.target.value }))}
                         className="mt-1"
-                        disabled={!canEdit()}
+                        disabled={!isEditable}
                       />
                     </div>
                     <div>
@@ -1252,7 +1290,7 @@ export default function CustomerDetailPage({ params }: { params: Promise<{ id: s
                         value={editedCustomer?.last_name || ''}
                         onChange={(e) => setEditedCustomer(prev => ({ ...prev!, last_name: e.target.value }))}
                         className="mt-1"
-                        disabled={!canEdit()}
+                        disabled={!isEditable}
                       />
                     </div>
                     <div>
@@ -1262,7 +1300,7 @@ export default function CustomerDetailPage({ params }: { params: Promise<{ id: s
                         value={editedCustomer?.email || ''}
                         onChange={(e) => setEditedCustomer(prev => ({ ...prev!, email: e.target.value }))}
                         className="mt-1"
-                        disabled={!canEdit()}
+                        disabled={!isEditable}
                       />
                     </div>
                     <div>
@@ -1272,7 +1310,7 @@ export default function CustomerDetailPage({ params }: { params: Promise<{ id: s
                         value={editedCustomer?.phone || ''}
                         onChange={(e) => setEditedCustomer(prev => ({ ...prev!, phone: e.target.value }))}
                         className="mt-1"
-                        disabled={!canEdit()}
+                        disabled={!isEditable}
                       />
                     </div>
                   </div>
@@ -1284,23 +1322,17 @@ export default function CustomerDetailPage({ params }: { params: Promise<{ id: s
                   <div className="space-y-4">
                     <div>
                       <Label htmlFor="company">Company</Label>
-                      <Select
-                        value={editedCustomer?.company_id || 'none'}
-                        onValueChange={(value) => setEditedCustomer(prev => ({ ...prev!, company_id: value === 'none' ? null : value }))}
-                        disabled={!canEdit()}
-                      >
-                        <SelectTrigger id="company" className="mt-1">
-                          <SelectValue placeholder="Select company" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="none">No Company</SelectItem>
-                          {companies.map((company) => (
-                            <SelectItem key={company.id} value={company.id}>
-                              {company.name}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
+                      <div className="mt-1">
+                        <CompanyCombobox
+                          companies={companies}
+                          value={editedCustomer?.company_id}
+                          onChange={(value) => {
+                            console.log('CompanyCombobox onChange:', value);
+                            setEditedCustomer(prev => ({ ...prev!, company_id: value }));
+                          }}
+                          disabled={!isEditable}
+                        />
+                      </div>
                     </div>
                     <div>
                       <Label htmlFor="position">Position</Label>
@@ -1309,7 +1341,7 @@ export default function CustomerDetailPage({ params }: { params: Promise<{ id: s
                         value={editedCustomer?.position || ''}
                         onChange={(e) => setEditedCustomer(prev => ({ ...prev!, position: e.target.value }))}
                         className="mt-1"
-                        disabled={!canEdit()}
+                        disabled={!isEditable}
                       />
                     </div>
                   </div>
@@ -1326,7 +1358,7 @@ export default function CustomerDetailPage({ params }: { params: Promise<{ id: s
                       <Select
                         value={editedCustomer?.role || ''}
                         onValueChange={(value) => setEditedCustomer(prev => ({ ...prev!, role: value as UserRole }))}
-                        disabled={!canEdit()}
+                        disabled={!isEditable}
                       >
                         <SelectTrigger id="role" className="mt-1">
                           <SelectValue placeholder="Select role" />
@@ -1349,7 +1381,7 @@ export default function CustomerDetailPage({ params }: { params: Promise<{ id: s
                       <Select
                         value={editedCustomer?.status || ''}
                         onValueChange={(value) => setEditedCustomer(prev => ({ ...prev!, status: value as UserStatus }))}
-                        disabled={!canEdit()}
+                        disabled={!isEditable}
                       >
                         <SelectTrigger id="status" className="mt-1">
                           <SelectValue>
@@ -1377,7 +1409,7 @@ export default function CustomerDetailPage({ params }: { params: Promise<{ id: s
                       <Select
                         value={editedCustomer?.owner_id || 'unassigned'}
                         onValueChange={(value) => setEditedCustomer(prev => ({ ...prev!, owner_id: value === 'unassigned' ? null : value }))}
-                        disabled={!canEdit()}
+                        disabled={!isEditable}
                       >
                         <SelectTrigger id="owner" className="mt-1">
                           <SelectValue>
@@ -1415,14 +1447,14 @@ export default function CustomerDetailPage({ params }: { params: Promise<{ id: s
                       value={editedCustomer?.notes || ''}
                       onChange={(e) => setEditedCustomer(prev => ({ ...prev!, notes: e.target.value }))}
                       className="mt-1 h-32"
-                      disabled={!canEdit()}
+                      disabled={!isEditable}
                     />
                   </div>
                 </div>
               </div>
             </div>
             <div className="flex justify-end space-x-2 mt-4">
-              {canEdit() && (
+              {isEditable && (
                 <>
                   <Button variant="outline" onClick={() => setEditedCustomer(customer)}>
                     Reset Changes
