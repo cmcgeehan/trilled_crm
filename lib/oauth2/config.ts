@@ -19,15 +19,16 @@ export const OUTLOOK_CONFIG = {
   clientSecret: process.env.MICROSOFT_CLIENT_SECRET!,
   redirectUri: process.env.MICROSOFT_REDIRECT_URI!,
   scopes: [
-    'openid',
     'offline_access',
+    'openid',
     'profile',
     'User.Read',
     'Mail.Read',
     'Mail.ReadWrite',
-    'Mail.Send'
+    'Mail.Send',
+    'email'
   ],
-  authority: 'https://login.microsoftonline.com/organizations'
+  authority: 'https://login.microsoftonline.com/common'
 }
 
 // Validate Outlook config
@@ -67,7 +68,9 @@ export const getOutlookAuthUrl = () => {
     redirect_uri: OUTLOOK_CONFIG.redirectUri,
     scope: OUTLOOK_CONFIG.scopes.join(' '),
     response_mode: 'query',
-    prompt: 'consent'
+    prompt: 'select_account',
+    state: 'outlook_auth',
+    access_type: 'offline'
   })
 
   return `${OUTLOOK_CONFIG.authority}/oauth2/v2.0/authorize?${params.toString()}`

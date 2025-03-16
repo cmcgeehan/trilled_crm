@@ -503,7 +503,7 @@ export default function CustomerDetailPage({ params }: { params: Promise<{ id: s
           }
 
           // Send email via API endpoint
-          const apiUrl = 'https://trilled-crm-git-main-cmcgeehans-projects.vercel.app/api/email/send'
+          const apiUrl = '/api/email/send'
 
           const response = await fetch(apiUrl, {
             method: 'POST',

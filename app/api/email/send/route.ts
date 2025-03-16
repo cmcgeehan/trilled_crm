@@ -2,11 +2,32 @@ import { createRouteHandlerClient } from '@supabase/auth-helpers-nextjs'
 import { cookies } from 'next/headers'
 import { NextRequest, NextResponse } from 'next/server'
 import { sendEmail } from '@/lib/oauth2/email'
+import type { GraphError } from '@/lib/oauth2/types'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 
+// Add OPTIONS handler for CORS preflight requests
+export async function OPTIONS() {
+  return new NextResponse(null, {
+    status: 204,
+    headers: {
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Methods': 'POST, OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+      'Access-Control-Max-Age': '86400'
+    }
+  })
+}
+
 export async function POST(request: NextRequest) {
+  // Add CORS headers
+  const headers = {
+    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Methods': 'POST, OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization'
+  }
+
   try {
     console.log('Starting email send request...')
     
@@ -18,7 +39,10 @@ export async function POST(request: NextRequest) {
     const authHeader = request.headers.get('Authorization')
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
       console.error('Missing or invalid authorization header:', { authHeader })
-      return NextResponse.json({ error: 'Missing or invalid authorization header' }, { status: 401 })
+      return NextResponse.json(
+        { error: 'Missing or invalid authorization header' }, 
+        { status: 401, headers }
+      )
     }
 
     const token = authHeader.split(' ')[1]
@@ -27,7 +51,7 @@ export async function POST(request: NextRequest) {
     
     if (authError || !user) {
       console.error('Auth error:', { authError, hasUser: !!user })
-      return NextResponse.json({ error: 'Invalid authentication token' }, { status: 401 })
+      return NextResponse.json({ error: 'Invalid authentication token' }, { status: 401, headers })
     }
 
     console.log('User authenticated:', { userId: user.id })
@@ -55,7 +79,7 @@ export async function POST(request: NextRequest) {
           .filter(entry => entry[1])
           .map(entry => entry[0])
           .join(', ')}`
-      }, { status: 400 })
+      }, { status: 400, headers })
     }
 
     // Get the user's email integration
@@ -71,14 +95,14 @@ export async function POST(request: NextRequest) {
       console.error('Integration query error:', integrationError)
       return NextResponse.json({ 
         error: `Failed to fetch email integration: ${integrationError.message}` 
-      }, { status: 500 })
+      }, { status: 500, headers })
     }
 
     if (!integrations || integrations.length === 0) {
       console.error('No email integration found for user:', user.id)
       return NextResponse.json({ 
         error: 'No email integration found - please connect your email account first' 
-      }, { status: 404 })
+      }, { status: 404, headers })
     }
 
     // Use the most recently created integration
@@ -103,7 +127,7 @@ export async function POST(request: NextRequest) {
       )
 
       console.log('Email sent successfully:', result)
-      return NextResponse.json({ success: true, result })
+      return NextResponse.json({ success: true, result }, { headers })
     } catch (emailError) {
       console.error('Error sending email:', {
         error: emailError,
@@ -116,19 +140,19 @@ export async function POST(request: NextRequest) {
         if (emailError.message.includes('invalid_grant')) {
           return NextResponse.json(
             { error: 'Email integration needs to be reconnected. Please go to Settings to reconnect your email account.' },
-            { status: 401 }
+            { status: 401, headers }
           )
         }
-        if (emailError.message.includes('invalid_token')) {
+        if (emailError.message.includes('invalid_token') || (emailError as GraphError).statusCode === 401) {
           return NextResponse.json(
             { error: 'Email integration token has expired. Please go to Settings to reconnect your email account.' },
-            { status: 401 }
+            { status: 401, headers }
           )
         }
         if (emailError.message.includes('token refresh')) {
           return NextResponse.json(
             { error: 'Failed to refresh email token. Please reconnect your email account in Settings.' },
-            { status: 401 }
+            { status: 401, headers }
           )
         }
       }
@@ -136,26 +160,33 @@ export async function POST(request: NextRequest) {
       // Return a detailed error response for other errors
       return NextResponse.json(
         { 
-          error: emailError instanceof Error ? emailError.message : 'Failed to send email',
-          details: emailError instanceof Error ? emailError.stack : undefined
+          error: emailError instanceof Error 
+            ? `Failed to send email: ${emailError.message}${emailError.cause ? ` (${JSON.stringify(emailError.cause)})` : ''}`
+            : 'Failed to send email',
+          details: emailError instanceof Error ? emailError.stack : undefined,
+          cause: emailError instanceof Error ? emailError.cause : undefined
         },
-        { status: 500 }
+        { status: 500, headers }
       )
     }
   } catch (error) {
     console.error('Unhandled error in email sending endpoint:', {
       error,
       message: error instanceof Error ? error.message : 'Unknown error',
-      stack: error instanceof Error ? error.stack : undefined
+      stack: error instanceof Error ? error.stack : undefined,
+      cause: error instanceof Error ? error.cause : undefined
     })
 
     // Return a more detailed error response
     return NextResponse.json(
       { 
-        error: error instanceof Error ? error.message : 'Failed to send email',
-        details: error instanceof Error ? error.stack : undefined
+        error: error instanceof Error 
+          ? `Failed to send email: ${error.message}${error.cause ? ` (${JSON.stringify(error.cause)})` : ''}`
+          : 'Failed to send email',
+        details: error instanceof Error ? error.stack : undefined,
+        cause: error instanceof Error ? error.cause : undefined
       },
-      { status: 500 }
+      { status: 500, headers }
     )
   }
 } 
