@@ -6,15 +6,78 @@ import { NextRequest, NextResponse } from 'next/server'
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 
+// Add CORS headers helper
+const corsHeaders = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
+  'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+}
+
+export async function OPTIONS() {
+  return NextResponse.json({}, { headers: corsHeaders })
+}
+
 export async function GET(request: NextRequest) {
   try {
+    console.log('Microsoft OAuth callback started')
     const searchParams = request.nextUrl.searchParams
     const code = searchParams.get('code')
     const error = searchParams.get('error')
     const errorDescription = searchParams.get('error_description')
+    const state = searchParams.get('state')
+    const sessionState = searchParams.get('session_state')
+    const adminConsent = searchParams.get('admin_consent')
+    
+    // Log all parameters for debugging
+    console.log('\n=== Microsoft OAuth Callback Details ===')
+    console.log('Timestamp:', new Date().toISOString())
+    console.log('Full URL:', request.url)
+    console.log('\nCallback Parameters:')
+    console.log('- Code:', code ? '✓ Present' : '✗ Missing')
+    console.log('- Error:', error || 'None')
+    console.log('- Error Description:', errorDescription || 'None')
+    console.log('- State:', state || 'None')
+    console.log('- Session State:', sessionState || 'None')
+    console.log('- Admin Consent:', adminConsent || 'None')
+    console.log('\nAll Search Params:', Object.fromEntries(searchParams.entries()))
+    console.log('\nRequest Headers:', Object.fromEntries(request.headers.entries()))
+    console.log('=======================================\n')
     
     // If Microsoft returned an error in the callback
     if (error || errorDescription) {
+      console.error('\n🚨 Microsoft OAuth Error 🚨')
+      console.error('----------------------------')
+      console.error('Error Type:', error)
+      console.error('Description:', errorDescription)
+      console.error('State:', state)
+      console.error('Session State:', sessionState)
+      console.error('Admin Consent:', adminConsent)
+      console.error('Timestamp:', new Date().toISOString())
+      console.error('URL:', request.url)
+      console.error('----------------------------\n')
+
+      // Check for specific error types
+      if (error === 'access_denied') {
+        if (errorDescription?.includes('AADSTS50105')) {
+          throw new Error('User is not assigned to a role for this application. Please contact your Microsoft 365 admin to grant access.')
+        }
+        if (errorDescription?.includes('AADSTS65005')) {
+          throw new Error('Application does not have sufficient permissions. Please contact your Microsoft 365 admin to grant permissions.')
+        }
+        if (errorDescription?.toLowerCase().includes('blocked')) {
+          throw new Error('Access was blocked by your Microsoft 365 organization settings. Please contact your admin to:\n1. Enable user consent for applications\n2. Add this application to allowed applications\n3. Check conditional access policies')
+        }
+        throw new Error(`Access denied by Microsoft: ${errorDescription}`)
+      }
+
+      if (error === 'invalid_client') {
+        throw new Error('Application configuration error. Please verify the application registration in Azure Portal.')
+      }
+
+      if (error === 'unauthorized_client') {
+        throw new Error('This application is not authorized for your organization. Please contact your Microsoft 365 admin to approve the application.')
+      }
+
       throw new Error(`Microsoft OAuth Error: ${error} - ${errorDescription}`)
     }
     
@@ -35,13 +98,13 @@ export async function GET(request: NextRequest) {
       scope: OUTLOOK_CONFIG.scopes.join(' ')
     })
 
-    console.log('Token request parameters:', {
-      endpoint: tokenEndpoint,
-      client_id: OUTLOOK_CONFIG.clientId,
-      hasClientSecret: !!OUTLOOK_CONFIG.clientSecret,
-      redirect_uri: OUTLOOK_CONFIG.redirectUri,
-      scopes: OUTLOOK_CONFIG.scopes
-    })
+    console.log('\n=== Token Request Details ===')
+    console.log('Endpoint:', tokenEndpoint)
+    console.log('Client ID:', OUTLOOK_CONFIG.clientId)
+    console.log('Has Client Secret:', !!OUTLOOK_CONFIG.clientSecret)
+    console.log('Redirect URI:', OUTLOOK_CONFIG.redirectUri)
+    console.log('Requested Scopes:', OUTLOOK_CONFIG.scopes)
+    console.log('===========================\n')
 
     const tokenResponse = await fetch(tokenEndpoint, {
       method: 'POST',
@@ -53,16 +116,18 @@ export async function GET(request: NextRequest) {
 
     if (!tokenResponse.ok) {
       const errorText = await tokenResponse.text()
-      console.error('Token exchange failed:', {
-        status: tokenResponse.status,
-        statusText: tokenResponse.statusText,
-        error: errorText
-      })
+      console.error('\n❌ Token Exchange Failed ❌')
+      console.error('---------------------------')
+      console.error('Status:', tokenResponse.status)
+      console.error('Status Text:', tokenResponse.statusText)
+      console.error('Error:', errorText)
+      console.error('Response Headers:', Object.fromEntries(tokenResponse.headers.entries()))
+      console.error('---------------------------\n')
       throw new Error(`Failed to exchange code for tokens: ${errorText}`)
     }
 
     const tokens = await tokenResponse.json()
-    console.log('Token exchange response:', {
+    console.log('Token exchange successful:', {
       hasAccessToken: !!tokens.access_token,
       accessTokenLength: tokens.access_token?.length,
       hasRefreshToken: !!tokens.refresh_token,
@@ -100,11 +165,27 @@ export async function GET(request: NextRequest) {
     
     // Get current user
     const { data: { session }, error: sessionError } = await supabase.auth.getSession()
+    
+    console.log('Supabase session check:', {
+      hasSession: !!session,
+      sessionError: sessionError?.message,
+      userId: session?.user?.id
+    })
+    
     if (sessionError || !session) {
-      throw new Error('Not authenticated')
+      console.error('Authentication error:', {
+        error: sessionError,
+        hasSession: !!session
+      })
+      throw new Error('Not authenticated - please log in again')
     }
 
     // Store integration in database
+    console.log('Storing email integration for user:', {
+      userId: session.user.id,
+      email: userInfo.mail || userInfo.userPrincipalName
+    })
+
     // First try to find an existing integration
     const { data: existingIntegration } = await supabase
       .from('email_integrations')
@@ -153,7 +234,13 @@ export async function GET(request: NextRequest) {
 
     // Redirect back to integrations page with success
     const successUrl = new URL('/settings/integrations?success=connected', process.env.NEXT_PUBLIC_APP_URL)
-    return NextResponse.redirect(successUrl, 302)
+    return NextResponse.redirect(successUrl, { 
+      status: 302,
+      headers: {
+        ...corsHeaders,
+        'Cache-Control': 'no-store'
+      }
+    })
   } catch (error) {
     console.error('Outlook OAuth callback error:', {
       error,
@@ -161,24 +248,16 @@ export async function GET(request: NextRequest) {
       stack: error instanceof Error ? error.stack : undefined
     })
     
-    // Return a more detailed error page
+    // Return error response with CORS headers
     const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred'
-    const errorDetails = error instanceof Error ? error.stack : JSON.stringify(error, null, 2)
-    
-    return new NextResponse(
-      `<html><body>
-        <h1>Error connecting to Outlook</h1>
-        <p>Error: ${errorMessage}</p>
-        <p>Details: ${errorDetails}</p>
-        <p>Time: ${new Date().toISOString()}</p>
-        <p>Please contact support with this information.</p>
-        <p><a href="/settings/integrations">Return to Integrations</a></p>
-      </body></html>`,
-      {
+    return NextResponse.json(
+      { error: errorMessage },
+      { 
         status: 500,
         headers: {
-          'Content-Type': 'text/html',
-        },
+          ...corsHeaders,
+          'Cache-Control': 'no-store'
+        }
       }
     )
   }

@@ -21,11 +21,8 @@ export const OUTLOOK_CONFIG = {
   scopes: [
     'offline_access',
     'openid',
-    'profile',
     'User.Read',
-    'Mail.Read',
-    'Mail.ReadWrite',
-    'Mail.Send',
+    'Mail.Send.Shared',
     'email'
   ],
   authority: 'https://login.microsoftonline.com/common'
