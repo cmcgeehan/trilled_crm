@@ -33,6 +33,7 @@ type Customer = Database['public']['Tables']['users']['Row'] & {
   status: UserStatus;
   company_id: string | null;
   notes: string | null;
+  linkedin: string | null;
   companies?: {
     id: string;
     name: string;
@@ -1309,6 +1310,16 @@ export default function CustomerDetailPage({ params }: { params: Promise<{ id: s
                         id="phone"
                         value={editedCustomer?.phone || ''}
                         onChange={(e) => setEditedCustomer(prev => ({ ...prev!, phone: e.target.value }))}
+                        className="mt-1"
+                        disabled={!isEditable}
+                      />
+                    </div>
+                    <div>
+                      <Label htmlFor="linkedin">LinkedIn</Label>
+                      <Input
+                        id="linkedin"
+                        value={editedCustomer?.linkedin || ''}
+                        onChange={(e) => setEditedCustomer(prev => ({ ...prev!, linkedin: e.target.value }))}
                         className="mt-1"
                         disabled={!isEditable}
                       />
