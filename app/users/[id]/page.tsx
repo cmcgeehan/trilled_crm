@@ -23,6 +23,7 @@ import { supabase } from "@/lib/supabase"
 import { Database } from "@/types/supabase"
 import { calculateFollowUpDates } from "@/lib/utils"
 import { CompanyCombobox } from "@/components/ui/company-combobox"
+import { OwnerCombobox } from "@/components/ui/owner-combobox"
 import { MessageInput } from "@/components/message-input"
 
 type UserRole = Database['public']['Tables']['users']['Row']['role']
@@ -45,6 +46,7 @@ type Agent = {
   id: string;
   email: string | null;
   first_name: string | null;
+  role: string;
 }
 
 type FollowUp = Omit<Database['public']['Tables']['follow_ups']['Row'], 'type'> & {
@@ -443,7 +445,7 @@ export default function CustomerDetailPage({ params }: { params: Promise<{ id: s
     try {
       const { data, error } = await supabase
         .from('users')
-        .select('id, email, first_name, last_name')
+        .select('id, email, first_name, last_name, role')
         .in('role', ['agent', 'admin', 'super_admin'])
         .is('deleted_at', null)
       
@@ -1437,33 +1439,12 @@ export default function CustomerDetailPage({ params }: { params: Promise<{ id: s
                     </div>
                     <div>
                       <Label htmlFor="owner">Owner</Label>
-                      <Select
-                        value={editedCustomer?.owner_id || 'unassigned'}
-                        onValueChange={(value) => setEditedCustomer(prev => ({ ...prev!, owner_id: value === 'unassigned' ? null : value }))}
+                      <OwnerCombobox
+                        owners={agents}
+                        value={editedCustomer?.owner_id || null}
+                        onChange={(value) => setEditedCustomer(prev => ({ ...prev!, owner_id: value }))}
                         disabled={!isEditable}
-                      >
-                        <SelectTrigger id="owner" className="mt-1">
-                          <SelectValue>
-                            {editedCustomer?.owner_id === undefined 
-                              ? 'Unassigned'
-                              : (() => {
-                                  const agent = agents.find(a => a.id === editedCustomer?.owner_id);
-                                  return agent
-                                    ? `${agent.first_name || 'Agent'} (${agent.email || `User ${agent.id}`})`
-                                    : 'Select owner'
-                                })()
-                          }
-                          </SelectValue>
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="unassigned">Unassigned</SelectItem>
-                          {agents.map((agent) => (
-                            <SelectItem key={agent.id} value={agent.id}>
-                              {agent.first_name || 'Agent'} ({agent.email || `User ${agent.id}`})
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
+                      />
                     </div>
                   </div>
                 </div>

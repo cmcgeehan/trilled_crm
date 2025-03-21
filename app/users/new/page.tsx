@@ -11,6 +11,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { supabase } from "@/lib/supabase"
 import { Database } from "@/types/supabase"
 import { CompanyCombobox } from "@/components/ui/company-combobox"
+import { OwnerCombobox } from "@/components/ui/owner-combobox"
 
 type UserRole = 'lead' | 'customer' | 'agent' | 'admin' | 'super_admin'
 type UserStatus = 'new' | 'won'
@@ -385,22 +386,11 @@ function NewUserForm() {
                 </div>
                 <div>
                   <Label htmlFor="owner">Owner</Label>
-                  <Select
-                    value={formData.owner_id || 'unassigned'}
-                    onValueChange={(value) => setFormData(prev => ({ ...prev, owner_id: value === 'unassigned' ? null : value }))}
-                  >
-                    <SelectTrigger id="owner" className="mt-1">
-                      <SelectValue placeholder="Select owner" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="unassigned">Unassigned</SelectItem>
-                      {agents.map((agent) => (
-                        <SelectItem key={agent.id} value={agent.id}>
-                          {agent.first_name || 'Agent'} ({agent.email || `User ${agent.id}`})
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  <OwnerCombobox
+                    owners={agents}
+                    value={formData.owner_id}
+                    onChange={(value) => setFormData(prev => ({ ...prev, owner_id: value }))}
+                  />
                 </div>
                 <div>
                   <Label htmlFor="notes">Notes</Label>
