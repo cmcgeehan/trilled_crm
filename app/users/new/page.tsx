@@ -10,6 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { supabase } from "@/lib/supabase"
 import { Database } from "@/types/supabase"
+import { CompanyCombobox } from "@/components/ui/company-combobox"
 
 type UserRole = 'lead' | 'customer' | 'agent' | 'admin' | 'super_admin'
 type UserStatus = 'new' | 'won'
@@ -28,6 +29,7 @@ function NewUserForm() {
     last_name: "",
     email: "",
     phone: "",
+    linkedin: "",
     position: "",
     company_id: searchParams?.get('company') || null as string | null,
     role: "lead" as UserRole,
@@ -137,9 +139,9 @@ function NewUserForm() {
     setLoading(true)
     setError(null)
 
-    // Validate that either email or phone is provided
-    if (!formData.email && !formData.phone) {
-      setError('Either email or phone number is required')
+    // Validate that either email, phone, or linkedin is provided
+    if (!formData.email && !formData.phone && !formData.linkedin) {
+      setError('At least one contact method (email, phone, or LinkedIn) is required')
       setLoading(false)
       return
     }
@@ -192,6 +194,7 @@ function NewUserForm() {
           last_name: formData.last_name,
           email: formData.email,
           phone: formData.phone,
+          linkedin: formData.linkedin,
           position: formData.position,
           company_id: formData.company_id || null,
           notes: formData.notes,
@@ -301,6 +304,18 @@ function NewUserForm() {
                   />
                 </div>
                 <div>
+                  <Label htmlFor="linkedin">LinkedIn</Label>
+                  <Input
+                    id="linkedin"
+                    name="linkedin"
+                    type="url"
+                    value={formData.linkedin}
+                    onChange={(e) => setFormData(prev => ({ ...prev, linkedin: e.target.value }))}
+                    placeholder="https://linkedin.com/in/username"
+                    className="mt-1"
+                  />
+                </div>
+                <div>
                   <Label htmlFor="position">Position</Label>
                   <Input
                     id="position"
@@ -339,26 +354,16 @@ function NewUserForm() {
                 </div>
                 <div>
                   <Label htmlFor="company">Company</Label>
-                  <Select
-                    defaultValue={searchParams?.get('company') || undefined}
-                    value={formData.company_id || undefined}
-                    onValueChange={(value) => {
-                      console.log('Company selected:', value)
-                      setFormData(prev => ({ ...prev, company_id: value || null }))
-                    }}
-                  >
-                    <SelectTrigger id="company" className="mt-1">
-                      <SelectValue placeholder="Select company" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="unassigned">No company</SelectItem>
-                      {companies.map((company) => (
-                        <SelectItem key={company.id} value={company.id}>
-                          {company.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  <div className="mt-1">
+                    <CompanyCombobox
+                      companies={companies}
+                      value={formData.company_id}
+                      onChange={(value) => {
+                        console.log('Company selected:', value)
+                        setFormData(prev => ({ ...prev, company_id: value }))
+                      }}
+                    />
+                  </div>
                 </div>
                 <div>
                   <Label htmlFor="owner">Owner</Label>
