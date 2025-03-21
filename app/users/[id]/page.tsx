@@ -6,7 +6,7 @@ import Link from "next/link"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Button } from "@/components/ui/button"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
-import { Play, Send, Phone, Calendar, ChevronLeft, ChevronRight, Check } from "lucide-react"
+import { Play, Calendar, ChevronLeft, ChevronRight, Check } from "lucide-react"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from "@/components/ui/dialog"
@@ -23,6 +23,7 @@ import { supabase } from "@/lib/supabase"
 import { Database } from "@/types/supabase"
 import { calculateFollowUpDates } from "@/lib/utils"
 import { CompanyCombobox } from "@/components/ui/company-combobox"
+import { MessageInput } from "@/components/message-input"
 
 type UserRole = Database['public']['Tables']['users']['Row']['role']
 type FollowUpType = 'email' | 'sms' | 'call' | 'meeting' | 'tour'
@@ -691,11 +692,6 @@ export default function CustomerDetailPage({ params }: { params: Promise<{ id: s
     } finally {
       setLoading(false)
     }
-  }
-
-  const handleClickToDial = () => {
-    if (!customer?.phone) return
-    console.log(`Initiating call to ${customer.phone}`)
   }
 
   const handleMarkAsLost = async () => {
@@ -1597,47 +1593,17 @@ export default function CustomerDetailPage({ params }: { params: Promise<{ id: s
                       );
                     })}
                   </div>
-                  <div className="flex space-x-2 mt-4 bg-gray-100 p-4 rounded-lg">
-                    <Select value={responseChannel} onValueChange={setResponseChannel}>
-                      <SelectTrigger className="w-[120px]">
-                        <SelectValue placeholder="Channel" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="email">Email</SelectItem>
-                        <SelectItem value="sms">SMS</SelectItem>
-                        <SelectItem value="internal">Internal</SelectItem>
-                      </SelectContent>
-                    </Select>
-                    <Textarea
-                      placeholder="Type your response..."
+                  <div className="mt-4">
+                    <MessageInput
                       value={responseMessage}
-                      onChange={(e) => setResponseMessage(e.target.value)}
-                      className="flex-grow"
+                      onChange={setResponseMessage}
+                      onSubmit={handleSendResponse}
+                      placeholder="Type your response... (Press / to use templates)"
+                      customer={customer}
+                      className="mt-2"
+                      responseChannel={responseChannel}
+                      onResponseChannelChange={setResponseChannel}
                     />
-                    <Button onClick={handleSendResponse}>
-                      <Send className="mr-2 h-4 w-4" />
-                      {responseChannel === "internal" ? "Add Note" : "Send"}
-                    </Button>
-                    <Popover>
-                      <PopoverTrigger asChild>
-                        <Button variant="outline">
-                          <Phone className="h-4 w-4" />
-                        </Button>
-                      </PopoverTrigger>
-                      <PopoverContent className="w-80">
-                        <div className="grid gap-4">
-                          <div className="space-y-2">
-                            <h4 className="font-medium leading-none">Click to Dial</h4>
-                            <p className="text-sm text-muted-foreground">
-                              Initiate a call to {customer ? (customer.first_name || '') + ' ' + (customer.last_name || '') || 'no phone number' : 'no phone number'}
-                            </p>
-                          </div>
-                          <Button onClick={handleClickToDial}>
-                            <Phone className="mr-2 h-4 w-4" /> Call {customer ? (customer.first_name || '') + ' ' + (customer.last_name || '') || 'customer' : 'customer'}
-                          </Button>
-                        </div>
-                      </PopoverContent>
-                    </Popover>
                   </div>
                 </div>
               </div>
