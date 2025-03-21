@@ -123,6 +123,7 @@ export default function CustomerDetailPage({ params }: { params: Promise<{ id: s
   const router = useRouter()
   const scrollContainerRef = useRef<HTMLDivElement>(null)
   const [companies, setCompanies] = useState<Database['public']['Tables']['companies']['Row'][]>([])
+  const [currentUser, setCurrentUser] = useState<Database['public']['Tables']['users']['Row'] | null>(null)
 
   const loadCompanies = useCallback(async () => {
     try {
@@ -263,7 +264,8 @@ export default function CustomerDetailPage({ params }: { params: Promise<{ id: s
 
       const customer = {
         ...data,
-        company_id: data.companies?.id
+        company_id: data.companies?.id,
+        owner: currentUser
       }
 
       setCustomer(customer)
@@ -315,7 +317,7 @@ export default function CustomerDetailPage({ params }: { params: Promise<{ id: s
     } finally {
       setLoading(false)
     }
-  }, [id, loadFollowUps, currentUserRole])
+  }, [id, loadFollowUps, currentUserRole, currentUser])
 
   useEffect(() => {
     loadCustomer()
@@ -950,6 +952,28 @@ export default function CustomerDetailPage({ params }: { params: Promise<{ id: s
       return ''
     }
   }
+
+  useEffect(() => {
+    const loadCurrentUser = async () => {
+      try {
+        const { data: { session } } = await supabase.auth.getSession()
+        if (!session) return
+
+        const { data: userData, error } = await supabase
+          .from('users')
+          .select('*')
+          .eq('id', session.user.id)
+          .single()
+
+        if (error) throw error
+        setCurrentUser(userData)
+      } catch (err) {
+        console.error('Error loading current user:', err)
+      }
+    }
+
+    loadCurrentUser()
+  }, [])
 
   if (loading) {
     return (

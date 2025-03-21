@@ -15,6 +15,16 @@ CREATE POLICY "Users can view their own data" ON users
   FOR SELECT
   USING (auth.uid() = id);
 
+CREATE POLICY "Users can view their owners" ON users
+  FOR SELECT
+  USING (
+    EXISTS (
+      SELECT 1 FROM users AS u
+      WHERE u.id = auth.uid()
+      AND u.owner_id = users.id
+    )
+  );
+
 CREATE POLICY "Admins can view all users in their organization" ON users
   FOR SELECT
   USING (

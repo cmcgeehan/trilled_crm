@@ -27,6 +27,7 @@ import {
 import { cn } from "@/lib/utils"
 import { createClientComponentClient } from "@supabase/auth-helpers-nextjs"
 import { MessageTemplatesDialog } from "@/components/message-templates-dialog"
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 
 interface MessageInputProps {
   value: string
@@ -43,6 +44,12 @@ interface MessageInputProps {
       id: string
       name: string
     } | null
+    owner?: {
+      first_name: string | null
+      last_name: string | null
+      email: string | null
+      position: string | null
+    }
   }
   responseChannel: string
   onResponseChannelChange: (value: string) => void
@@ -101,6 +108,10 @@ export function MessageInput({
         .replace(/\{last_name\}/g, customer.last_name || '')
         .replace(/\{email\}/g, customer.email || '')
         .replace(/\{company_name\}/g, customer.companies?.name || '')
+        .replace(/\{agent_first_name\}/g, customer.owner?.first_name || '')
+        .replace(/\{agent_last_name\}/g, customer.owner?.last_name || '')
+        .replace(/\{agent_email\}/g, customer.owner?.email || '')
+        .replace(/\{agent_position\}/g, customer.owner?.position || '')
     }
 
     onChange(content)
@@ -111,9 +122,18 @@ export function MessageInput({
 
   // Handle keydown events
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault()
-      onSubmit()
+    if (e.key === 'Enter') {
+      // Check for Command+Enter (Mac) or Control+Enter (Windows/Linux)
+      if ((e.metaKey || e.ctrlKey) && !e.shiftKey) {
+        e.preventDefault()
+        onSubmit()
+        return
+      }
+      // Regular Enter without shift
+      if (!e.shiftKey) {
+        e.preventDefault()
+        onSubmit()
+      }
     } else if (e.key === '/' && !showCommandPalette) {
       e.preventDefault()
       setShowCommandPalette(true)
@@ -125,47 +145,69 @@ export function MessageInput({
   }
 
   return (
-    <div className={cn("relative w-full", className)}>
-      <div className="relative">
-        <Textarea
-          ref={textareaRef}
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-          onKeyDown={handleKeyDown}
-          placeholder={placeholder}
-          className="min-h-[100px] pr-[200px] pl-4 py-3"
-        />
-        <div className="absolute bottom-3 right-3 flex items-center space-x-2">
-          <Select value={responseChannel} onValueChange={onResponseChannelChange}>
-            <SelectTrigger className="h-8 w-[100px] text-sm bg-white">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="email">Email</SelectItem>
-              <SelectItem value="sms">SMS</SelectItem>
-              <SelectItem value="internal">Internal</SelectItem>
-            </SelectContent>
-          </Select>
-          <div className="flex items-center space-x-1">
-            <MessageTemplatesDialog
-              trigger={
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-8 w-8 hover:bg-gray-100"
-                >
-                  <FileText className="h-4 w-4 text-gray-500" />
-                </Button>
-              }
-              onInsert={handleTemplateSelect}
-            />
-            <Button
-              size="icon"
-              className="h-8 w-8 bg-brand-darkBlue hover:bg-brand-darkBlue/90"
-              onClick={onSubmit}
-            >
-              <Send className="h-4 w-4" />
-            </Button>
+    <TooltipProvider>
+      <div className={cn("relative w-full", className)}>
+        <div className="relative">
+          <Textarea
+            ref={textareaRef}
+            value={value}
+            onChange={(e) => onChange(e.target.value)}
+            onKeyDown={handleKeyDown}
+            placeholder={placeholder}
+            className="min-h-[100px] pr-[200px] pl-4 py-3"
+          />
+          <div className="absolute bottom-3 right-3 flex items-center space-x-2">
+            <Select value={responseChannel} onValueChange={onResponseChannelChange}>
+              <SelectTrigger className="h-8 w-[100px] text-sm bg-white">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="email">Email</SelectItem>
+                <SelectItem value="sms">SMS</SelectItem>
+                <SelectItem value="internal">Internal</SelectItem>
+              </SelectContent>
+            </Select>
+            <div className="flex items-center gap-2">
+              <TooltipProvider delayDuration={0}>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <MessageTemplatesDialog
+                      trigger={
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8 text-gray-500 hover:text-gray-700"
+                        >
+                          <FileText className="h-4 w-4" />
+                        </Button>
+                      }
+                      onInsert={handleTemplateSelect}
+                    />
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    <p>Message Templates</p>
+                  </TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+
+              <TooltipProvider delayDuration={0}>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      type="submit"
+                      size="icon"
+                      className="h-8 w-8 bg-brand-darkBlue hover:bg-brand-darkBlue/90 text-white"
+                      disabled={!value.trim()}
+                    >
+                      <Send className="h-4 w-4" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    <p>Send Message</p>
+                  </TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+            </div>
           </div>
         </div>
       </div>
@@ -204,6 +246,6 @@ export function MessageInput({
           </Command>
         </PopoverContent>
       </Popover>
-    </div>
+    </TooltipProvider>
   )
 } 

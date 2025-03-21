@@ -1,7 +1,7 @@
 "use client"
 
 import * as React from "react"
-import { Plus, Trash2, ArrowRight } from "lucide-react"
+import { Plus, Trash2, ArrowRight, Pencil } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
@@ -33,6 +33,11 @@ export function MessageTemplatesDialog({ trigger, onInsert }: MessageTemplatesDi
     name: "",
     content: "",
   })
+  const [editingTemplate, setEditingTemplate] = React.useState<{
+    id: string
+    name: string
+    content: string
+  } | null>(null)
   const supabase = createClientComponentClient()
 
   const loadTemplates = React.useCallback(async () => {
@@ -100,6 +105,40 @@ export function MessageTemplatesDialog({ trigger, onInsert }: MessageTemplatesDi
     loadTemplates()
   }
 
+  const handleUpdateTemplate = async () => {
+    if (!editingTemplate || !editingTemplate.name || !editingTemplate.content) {
+      toast.error("Please fill in all fields")
+      return
+    }
+
+    const { error } = await supabase
+      .from('message_templates')
+      .update({
+        name: editingTemplate.name,
+        content: editingTemplate.content,
+      })
+      .eq('id', editingTemplate.id)
+
+    if (error) {
+      console.error('Error updating template:', error)
+      toast.error("Failed to update template")
+      return
+    }
+
+    toast.success("Template updated successfully")
+    setEditingTemplate(null)
+    loadTemplates()
+  }
+
+  const handleEditTemplate = (template: { id: string; name: string; content: string }) => {
+    setEditingTemplate(template)
+    setNewTemplate({ name: "", content: "" })
+  }
+
+  const handleCancelEdit = () => {
+    setEditingTemplate(null)
+  }
+
   const handleDeleteTemplate = async (id: string) => {
     const { error } = await supabase
       .from('message_templates')
@@ -132,36 +171,59 @@ export function MessageTemplatesDialog({ trigger, onInsert }: MessageTemplatesDi
         <DialogHeader>
           <DialogTitle>Message Templates</DialogTitle>
           <DialogDescription>
-            Create and manage your message templates. Use variables like {'{first_name}'}, {'{last_name}'}, {'{email}'}, and {'{company_name}'} to personalize your messages.
+            Create and manage your message templates. Use variables like {'{first_name}'}, {'{last_name}'}, {'{email}'}, {'{company_name}'}, {'{agent_first_name}'}, {'{agent_last_name}'}, {'{agent_email}'}, and {'{agent_position}'} to personalize your messages.
           </DialogDescription>
         </DialogHeader>
 
         <div className="space-y-4">
           <div className="space-y-2">
-            <Label htmlFor="name">Template Name</Label>
+            <Label htmlFor="name">{editingTemplate ? "Edit Template Name" : "Template Name"}</Label>
             <Input
               id="name"
-              value={newTemplate.name}
-              onChange={(e) => setNewTemplate(prev => ({ ...prev, name: e.target.value }))}
+              value={editingTemplate ? editingTemplate.name : newTemplate.name}
+              onChange={(e) => {
+                if (editingTemplate) {
+                  setEditingTemplate(prev => ({ ...prev!, name: e.target.value }))
+                } else {
+                  setNewTemplate(prev => ({ ...prev, name: e.target.value }))
+                }
+              }}
               placeholder="Enter template name"
             />
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="content">Template Content</Label>
+            <Label htmlFor="content">{editingTemplate ? "Edit Template Content" : "Template Content"}</Label>
             <Textarea
               id="content"
-              value={newTemplate.content}
-              onChange={(e) => setNewTemplate(prev => ({ ...prev, content: e.target.value }))}
+              value={editingTemplate ? editingTemplate.content : newTemplate.content}
+              onChange={(e) => {
+                if (editingTemplate) {
+                  setEditingTemplate(prev => ({ ...prev!, content: e.target.value }))
+                } else {
+                  setNewTemplate(prev => ({ ...prev, content: e.target.value }))
+                }
+              }}
               placeholder="Enter template content"
               className="min-h-[100px]"
             />
           </div>
 
-          <Button onClick={handleCreateTemplate} className="w-full">
-            <Plus className="mr-2 h-4 w-4" />
-            Create Template
-          </Button>
+          {editingTemplate ? (
+            <div className="flex gap-2">
+              <Button onClick={handleUpdateTemplate} className="flex-1">
+                Update Template
+              </Button>
+              <Button onClick={handleCancelEdit} variant="outline" className="flex-1">
+                Cancel
+              </Button>
+            </div>
+          ) : (
+            <Button onClick={handleCreateTemplate} className="w-full">
+              <Plus className="mr-2 h-4 w-4" />
+              Create Template
+            </Button>
+          )}
 
           <div className="space-y-2">
             <h3 className="font-medium">Your Templates</h3>
@@ -176,6 +238,14 @@ export function MessageTemplatesDialog({ trigger, onInsert }: MessageTemplatesDi
                     className="h-8 w-8 hover:bg-gray-100"
                   >
                     <ArrowRight className="h-4 w-4 text-gray-500" />
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => handleEditTemplate(template)}
+                    className="h-8 w-8 hover:bg-gray-100"
+                  >
+                    <Pencil className="h-4 w-4 text-gray-500" />
                   </Button>
                   <Button
                     variant="ghost"
