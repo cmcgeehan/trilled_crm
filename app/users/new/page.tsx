@@ -41,28 +41,55 @@ function NewUserForm() {
   const loadCompanies = useCallback(async () => {
     try {
       console.log('Loading companies...')
-      const { data, error } = await supabase
+      const companyId = searchParams?.get('company')
+      console.log('Company ID from URL:', companyId)
+
+      // Load all companies first
+      const { data: allCompanies, error } = await supabase
         .from('companies')
         .select('*')
         .is('deleted_at', null)
         .order('name')
+        .limit(1000)
 
       if (error) throw error
-      
-      // Get company ID from URL query parameter
-      const companyId = searchParams?.get('company')
-      console.log('Company ID from URL:', companyId)
-      console.log('Available companies:', data)
 
-      setCompanies(data || [])
+      // If we have a specific company ID, ensure it's in the list and at the top
+      if (companyId) {
+        // Find the specific company in the loaded companies
+        const specificCompany = allCompanies?.find(company => company.id === companyId)
+        
+        if (specificCompany) {
+          // Filter out the specific company from the rest of the list
+          const otherCompanies = allCompanies?.filter(company => company.id !== companyId) || []
+          // Set the companies with the specific company first
+          setCompanies([specificCompany, ...otherCompanies])
+        } else {
+          // If the specific company wasn't in the first 1000, load it separately
+          const { data: companyData, error: companyError } = await supabase
+            .from('companies')
+            .select('*')
+            .eq('id', companyId)
+            .single()
 
-      // Set the company ID in form data if it exists in the loaded companies
-      if (companyId && data?.some(company => company.id === companyId)) {
+          if (companyError) {
+            console.error('Error loading specific company:', companyError)
+          } else if (companyData) {
+            console.log('Loaded specific company:', companyData)
+            // Set the companies with the specific company first
+            setCompanies([companyData, ...(allCompanies || [])])
+          }
+        }
+
+        // Set the company ID in form data
         console.log('Setting company ID in form:', companyId)
-        setFormData(prev => {
-          console.log('Previous form data:', prev)
-          return { ...prev, company_id: companyId }
-        })
+        setFormData(prev => ({
+          ...prev,
+          company_id: companyId
+        }))
+      } else {
+        // If no specific company, just set all companies
+        setCompanies(allCompanies || [])
       }
     } catch (err) {
       console.error('Error loading companies:', err)
@@ -124,15 +151,6 @@ function NewUserForm() {
       console.error('Error loading agents:', err)
     }
   }
-
-  // Add a useEffect to handle company ID changes
-  useEffect(() => {
-    const companyId = searchParams?.get('company')
-    if (companyId && companies.some(company => company.id === companyId)) {
-      console.log('Setting company ID from URL:', companyId)
-      setFormData(prev => ({ ...prev, company_id: companyId }))
-    }
-  }, [companies, searchParams])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
