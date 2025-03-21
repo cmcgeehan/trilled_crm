@@ -35,8 +35,8 @@ function LoginForm() {
         router.refresh()
         
         // Use router.push which will go through the middleware
-        const redirectTo = searchParams.get('redirectTo')
-        router.push(redirectTo || '/')
+        const redirectTo = searchParams?.get('redirectTo') || '/'
+        router.push(redirectTo)
       }
     } catch (error) {
       console.error('Sign in error:', error)

@@ -13,6 +13,7 @@ import { supabase } from "@/lib/supabase"
 import { Database } from "@/types/supabase"
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
 import { Loader2 } from "lucide-react"
+import { Plus } from "lucide-react"
 
 declare global {
   interface Window {
@@ -72,7 +73,7 @@ type User = Database['public']['Tables']['users']['Row']
 
 export default function CompanyDetailsPage() {
   const params = useParams()
-  const id = params.id as string
+  const id = params?.id as string || ''
   const router = useRouter()
   const [company, setCompany] = useState<Company | null>(null)
   const [users, setUsers] = useState<User[]>([])
@@ -239,10 +240,10 @@ export default function CompanyDetailsPage() {
         throw new Error('Company not found or already deleted')
       }
 
-      // Perform soft delete - just set deleted_at
+      // Perform delete operation
       const { error } = await supabase
         .from('companies')
-        .update({ deleted_at: new Date().toISOString() })
+        .delete()
         .eq('id', id)
         .is('deleted_at', null)
 
@@ -677,7 +678,17 @@ export default function CompanyDetailsPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle>Associated Users</CardTitle>
+          <div className="flex justify-between items-center">
+            <CardTitle>Associated Users</CardTitle>
+            <Button
+              variant="outline"
+              onClick={() => router.push(`/users/new?company=${id}`)}
+              className="flex items-center gap-2"
+            >
+              <Plus className="h-4 w-4" />
+              New User
+            </Button>
+          </div>
         </CardHeader>
         <CardContent>
           <Table>

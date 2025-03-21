@@ -172,7 +172,7 @@ export function NavBar() {
                 href="/users"
                 className={cn(
                   "inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium",
-                  pathname.startsWith("/users")
+                  pathname?.startsWith("/users")
                     ? "border-brand-lightBlue text-gray-900"
                     : "border-transparent text-gray-500 hover:border-brand-lightBlue hover:text-gray-700"
                 )}
@@ -184,7 +184,7 @@ export function NavBar() {
                 href="/companies"
                 className={cn(
                   "inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium",
-                  pathname.startsWith("/companies")
+                  pathname?.startsWith("/companies")
                     ? "border-brand-lightBlue text-gray-900"
                     : "border-transparent text-gray-500 hover:border-brand-lightBlue hover:text-gray-700"
                 )}

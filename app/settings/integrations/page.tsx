@@ -22,8 +22,8 @@ function EmailIntegrationsContent() {
 
   // Check for success or error messages in URL
   useEffect(() => {
-    const success = searchParams.get('success')
-    const error = searchParams.get('error')
+    const success = searchParams?.get('success') || ''
+    const error = searchParams?.get('error') || ''
     
     if (success === 'connected') {
       setSuccess('Email integration connected successfully!')

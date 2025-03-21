@@ -31,8 +31,8 @@ export default function AuthHandler() {
       }
 
       // Check query parameters for token
-      const token = searchParams.get('token')
-      const type = searchParams.get('type')
+      const token = searchParams?.get('token') || ''
+      const type = searchParams?.get('type') || ''
 
       console.log('Query params:', { token: !!token, type })
 

@@ -452,7 +452,7 @@ export default function CustomerDetailPage({ params }: { params: Promise<{ id: s
   }
 
   useEffect(() => {
-    const tab = searchParams.get("tab")
+    const tab = searchParams?.get("tab") || ''
     if (tab === "cases") {
       setActiveTab("cases")
     }

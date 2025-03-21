@@ -20,8 +20,8 @@ function VerifyInviteContent() {
   useEffect(() => {
     const verifyInvite = async () => {
       try {
-        const token = searchParams.get('token');
-        const type = searchParams.get('type');
+        const token = searchParams?.get('token') || '';
+        const type = searchParams?.get('type') || '';
 
         console.log('Verifying token:', { token, type });
 

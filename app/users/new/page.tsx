@@ -1,7 +1,7 @@
 "use client"
 
-import { useState, useEffect } from "react"
-import { useRouter } from "next/navigation"
+import { useState, useEffect, useCallback, Suspense } from "react"
+import { useRouter, useSearchParams } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -14,8 +14,9 @@ import { Database } from "@/types/supabase"
 type UserRole = 'lead' | 'customer' | 'agent' | 'admin' | 'super_admin'
 type UserStatus = 'new' | 'won'
 
-export default function NewUserPage() {
+function NewUserForm() {
   const router = useRouter()
+  const searchParams = useSearchParams()
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [agents, setAgents] = useState<{ id: string, email: string | null, first_name: string | null, role: UserRole }[]>([])
@@ -28,12 +29,43 @@ export default function NewUserPage() {
     email: "",
     phone: "",
     position: "",
-    company_id: "",
+    company_id: searchParams?.get('company') || null as string | null,
     role: "lead" as UserRole,
     status: "new" as UserStatus,
     owner_id: null as string | null,
     notes: "",
   })
+
+  const loadCompanies = useCallback(async () => {
+    try {
+      console.log('Loading companies...')
+      const { data, error } = await supabase
+        .from('companies')
+        .select('*')
+        .is('deleted_at', null)
+        .order('name')
+
+      if (error) throw error
+      
+      // Get company ID from URL query parameter
+      const companyId = searchParams?.get('company')
+      console.log('Company ID from URL:', companyId)
+      console.log('Available companies:', data)
+
+      setCompanies(data || [])
+
+      // Set the company ID in form data if it exists in the loaded companies
+      if (companyId && data?.some(company => company.id === companyId)) {
+        console.log('Setting company ID in form:', companyId)
+        setFormData(prev => {
+          console.log('Previous form data:', prev)
+          return { ...prev, company_id: companyId }
+        })
+      }
+    } catch (err) {
+      console.error('Error loading companies:', err)
+    }
+  }, [searchParams])
 
   useEffect(() => {
     const checkSession = async () => {
@@ -65,7 +97,7 @@ export default function NewUserPage() {
     checkSession()
     loadAgents()
     loadCompanies()
-  }, [router])
+  }, [router, loadCompanies])
 
   const loadAgents = async () => {
     try {
@@ -91,20 +123,14 @@ export default function NewUserPage() {
     }
   }
 
-  const loadCompanies = async () => {
-    try {
-      const { data, error } = await supabase
-        .from('companies')
-        .select('*')
-        .is('deleted_at', null)
-        .order('name')
-
-      if (error) throw error
-      setCompanies(data || [])
-    } catch (err) {
-      console.error('Error loading companies:', err)
+  // Add a useEffect to handle company ID changes
+  useEffect(() => {
+    const companyId = searchParams?.get('company')
+    if (companyId && companies.some(company => company.id === companyId)) {
+      console.log('Setting company ID from URL:', companyId)
+      setFormData(prev => ({ ...prev, company_id: companyId }))
     }
-  }
+  }, [companies, searchParams])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -314,13 +340,18 @@ export default function NewUserPage() {
                 <div>
                   <Label htmlFor="company">Company</Label>
                   <Select
-                    value={formData.company_id}
-                    onValueChange={(value) => setFormData(prev => ({ ...prev, company_id: value }))}
+                    defaultValue={searchParams?.get('company') || undefined}
+                    value={formData.company_id || undefined}
+                    onValueChange={(value) => {
+                      console.log('Company selected:', value)
+                      setFormData(prev => ({ ...prev, company_id: value || null }))
+                    }}
                   >
                     <SelectTrigger id="company" className="mt-1">
                       <SelectValue placeholder="Select company" />
                     </SelectTrigger>
                     <SelectContent>
+                      <SelectItem value="unassigned">No company</SelectItem>
                       {companies.map((company) => (
                         <SelectItem key={company.id} value={company.id}>
                           {company.name}
@@ -383,4 +414,12 @@ export default function NewUserPage() {
       </Card>
     </div>
   )
-} 
+}
+
+export default function NewUserPage() {
+  return (
+    <Suspense fallback={<div>Loading...</div>}>
+      <NewUserForm />
+    </Suspense>
+  )
+}
