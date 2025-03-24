@@ -111,23 +111,53 @@ export function MessageTemplatesDialog({ trigger, onInsert }: MessageTemplatesDi
       return
     }
 
-    const { error } = await supabase
-      .from('message_templates')
-      .update({
-        name: editingTemplate.name,
-        content: editingTemplate.content,
-      })
-      .eq('id', editingTemplate.id)
+    try {
+      const { data: { session } } = await supabase.auth.getSession()
+      if (!session) {
+        toast.error("You must be logged in to update templates")
+        return
+      }
 
-    if (error) {
-      console.error('Error updating template:', error)
-      toast.error("Failed to update template")
-      return
+      // First check if the user owns this template
+      const { data: template, error: fetchError } = await supabase
+        .from('message_templates')
+        .select('created_by')
+        .eq('id', editingTemplate.id)
+        .single()
+
+      if (fetchError) {
+        console.error('Error fetching template:', fetchError)
+        toast.error("Failed to verify template ownership")
+        return
+      }
+
+      if (template.created_by !== session.user.id) {
+        toast.error("You can only update templates you created")
+        return
+      }
+
+      const { error: updateError } = await supabase
+        .from('message_templates')
+        .update({
+          name: editingTemplate.name,
+          content: editingTemplate.content,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', editingTemplate.id)
+
+      if (updateError) {
+        console.error('Error updating template:', updateError)
+        toast.error("Failed to update template")
+        return
+      }
+
+      toast.success("Template updated successfully")
+      setEditingTemplate(null)
+      loadTemplates()
+    } catch (error) {
+      console.error('Error in handleUpdateTemplate:', error)
+      toast.error("An unexpected error occurred")
     }
-
-    toast.success("Template updated successfully")
-    setEditingTemplate(null)
-    loadTemplates()
   }
 
   const handleEditTemplate = (template: { id: string; name: string; content: string }) => {
@@ -140,19 +170,48 @@ export function MessageTemplatesDialog({ trigger, onInsert }: MessageTemplatesDi
   }
 
   const handleDeleteTemplate = async (id: string) => {
-    const { error } = await supabase
-      .from('message_templates')
-      .delete()
-      .eq('id', id)
+    try {
+      const { data: { session } } = await supabase.auth.getSession()
+      if (!session) {
+        toast.error("You must be logged in to delete templates")
+        return
+      }
 
-    if (error) {
-      console.error('Error deleting template:', error)
-      toast.error("Failed to delete template")
-      return
+      // First check if the user owns this template
+      const { data: template, error: fetchError } = await supabase
+        .from('message_templates')
+        .select('created_by')
+        .eq('id', id)
+        .single()
+
+      if (fetchError) {
+        console.error('Error fetching template:', fetchError)
+        toast.error("Failed to verify template ownership")
+        return
+      }
+
+      if (template.created_by !== session.user.id) {
+        toast.error("You can only delete templates you created")
+        return
+      }
+
+      const { error: updateError } = await supabase
+        .from('message_templates')
+        .update({ deleted_at: new Date().toISOString() })
+        .eq('id', id)
+
+      if (updateError) {
+        console.error('Error deleting template:', updateError)
+        toast.error("Failed to delete template")
+        return
+      }
+
+      toast.success("Template deleted successfully")
+      loadTemplates()
+    } catch (error) {
+      console.error('Error in handleDeleteTemplate:', error)
+      toast.error("An unexpected error occurred")
     }
-
-    toast.success("Template deleted successfully")
-    loadTemplates()
   }
 
   const handleInsertTemplate = (template: { content: string }) => {
