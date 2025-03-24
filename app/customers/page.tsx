@@ -6,6 +6,9 @@ import { Button } from "@/components/ui/button"
 import { supabase } from "@/lib/supabase"
 import { Database } from "@/types/supabase"
 
+// Force dynamic rendering
+export const dynamic = 'force-dynamic'
+
 type Customer = Database['public']['Tables']['users']['Row'] & {
   name?: string;
   company?: string | null;

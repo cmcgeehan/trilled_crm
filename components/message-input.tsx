@@ -198,6 +198,7 @@ export function MessageInput({
                       size="icon"
                       className="h-8 w-8 bg-brand-darkBlue hover:bg-brand-darkBlue/90 text-white"
                       disabled={!value.trim()}
+                      onClick={onSubmit}
                     >
                       <Send className="h-4 w-4" />
                     </Button>
