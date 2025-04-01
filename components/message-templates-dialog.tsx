@@ -14,7 +14,8 @@ import {
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
-import { createClientComponentClient } from "@supabase/auth-helpers-nextjs"
+import { createBrowserClient } from "@supabase/ssr"
+import { Database } from "@/types/supabase"
 import { toast } from "sonner"
 
 interface MessageTemplatesDialogProps {
@@ -38,7 +39,11 @@ export function MessageTemplatesDialog({ trigger, onInsert }: MessageTemplatesDi
     name: string
     content: string
   } | null>(null)
-  const supabase = createClientComponentClient()
+
+  const supabase = createBrowserClient<Database>(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+  )
 
   const loadTemplates = React.useCallback(async () => {
     const { data: { session } } = await supabase.auth.getSession()

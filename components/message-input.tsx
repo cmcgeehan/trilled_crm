@@ -25,9 +25,10 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { cn } from "@/lib/utils"
-import { createClientComponentClient } from "@supabase/auth-helpers-nextjs"
+import { createBrowserClient } from "@supabase/ssr"
 import { MessageTemplatesDialog } from "@/components/message-templates-dialog"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
+import { Database } from "@/types/supabase"
 
 interface MessageInputProps {
   value: string
@@ -72,7 +73,10 @@ export function MessageInput({
     content: string
   }>>([])
   const textareaRef = React.useRef<HTMLTextAreaElement>(null)
-  const supabase = createClientComponentClient()
+  const supabase = createBrowserClient<Database>(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+  )
 
   // Load templates
   React.useEffect(() => {

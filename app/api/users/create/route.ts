@@ -1,28 +1,12 @@
+import { createServerClient } from '@supabase/ssr'
 import { createClient } from '@supabase/supabase-js'
-import { cookies } from 'next/headers'
 import { NextResponse } from 'next/server'
-import { createRouteHandlerClient } from '@supabase/auth-helpers-nextjs'
 import { calculateFollowUpDates } from '@/lib/utils'
 
 // Ensure required environment variables are present
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY
-
-if (!supabaseUrl || !supabaseServiceKey) {
-  throw new Error('Required environment variables are missing')
+if (!process.env.NEXT_PUBLIC_SUPABASE_URL || !process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
+  throw new Error('Missing Supabase environment variables')
 }
-
-// Create a Supabase client with the service role key
-const supabaseAdmin = createClient(
-  supabaseUrl,
-  supabaseServiceKey,
-  {
-    auth: {
-      autoRefreshToken: false,
-      persistSession: false
-    }
-  }
-)
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -32,9 +16,39 @@ export async function POST(request: Request) {
     const userData = await request.json()
     console.log('API: Received user data:', userData)
     
-    // Use the normal client to check authentication and get the user's session
-    const cookieStore = cookies()
-    const supabase = createRouteHandlerClient({ cookies: () => cookieStore })
+    // Create a Supabase client with the service role key for admin operations
+    const supabaseAdmin = createClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY!,
+      {
+        auth: {
+          autoRefreshToken: false,
+          persistSession: false
+        }
+      }
+    )
+
+    // Create a regular client for session verification
+    const supabase = createServerClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+      {
+        cookies: {
+          get(name: string) {
+            const cookie = request.headers.get('cookie')
+            if (!cookie) return undefined
+            const match = cookie.match(new RegExp(`${name}=([^;]+)`))
+            return match ? match[1] : undefined
+          },
+          set() {
+            // Cookies are handled by middleware
+          },
+          remove() {
+            // Cookies are handled by middleware
+          },
+        },
+      }
+    )
     
     // Verify user is authenticated and has appropriate role
     const { data: { session } } = await supabase.auth.getSession()

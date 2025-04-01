@@ -8,6 +8,7 @@ import { supabase } from "@/lib/supabase"
 import { useRouter } from "next/navigation"
 import { Database } from "@/types/supabase"
 import { cn } from "@/lib/utils"
+import { Badge } from "@/components/ui/badge"
 
 type UserStatus = 'needs_response' | 'new' | 'follow_up' | 'won' | 'lost'
 type UserRole = 'lead' | 'customer' | 'agent' | 'admin' | 'super_admin'
@@ -20,6 +21,7 @@ type User = Omit<Database['public']['Tables']['users']['Row'], 'status' | 'role'
     id: string
     name: string
   } | null
+  lead_type?: 'B2B' | 'B2C' | null
 }
 
 const ACTIVE_STATUSES = ['needs_response', 'new', 'follow_up'] as const
@@ -43,6 +45,11 @@ const STATUS_STYLES: Record<UserStatus, { bg: string, text: string }> = {
 const ROLE_BADGE_STYLES: Record<'lead' | 'customer', { bg: string, text: string }> = {
   'lead': { bg: 'bg-purple-100', text: 'text-purple-800' },
   'customer': { bg: 'bg-green-100', text: 'text-green-800' },
+}
+
+const LEAD_TYPE_BADGE_STYLES: Record<'B2B' | 'B2C', { bg: string, text: string }> = {
+  'B2B': { bg: 'bg-blue-100', text: 'text-blue-800' },
+  'B2C': { bg: 'bg-orange-100', text: 'text-orange-800' },
 }
 
 export default function DashboardPage() {
@@ -171,13 +178,19 @@ export default function DashboardPage() {
       return
     }
 
-    // Sort users by status priority and ensure correct typing
+    // Sort users by lead type (B2C first), role (leads first), and status priority
     const sortedUsers = [...(data || [])].map(user => ({
       ...user,
       status: user.status as UserStatus,
       role: user.role as UserRole
     })).sort((a, b) => {
-      // First sort by role (leads first)
+      // First sort by lead type (B2C first)
+      if (a.role === 'lead' && b.role === 'lead') {
+        if (a.lead_type !== b.lead_type) {
+          return a.lead_type === 'B2C' ? -1 : 1
+        }
+      }
+      // Then by role (leads first)
       if (a.role !== b.role) {
         return a.role === 'lead' ? -1 : 1
       }
@@ -270,6 +283,13 @@ export default function DashboardPage() {
                     >
                       {user.role.charAt(0).toUpperCase() + user.role.slice(1)}
                     </div>
+                    {user.role === 'lead' && user.lead_type && (
+                      <Badge 
+                        className={`${LEAD_TYPE_BADGE_STYLES[user.lead_type as 'B2B' | 'B2C'].bg} ${LEAD_TYPE_BADGE_STYLES[user.lead_type as 'B2B' | 'B2C'].text}`}
+                      >
+                        {user.lead_type}
+                      </Badge>
+                    )}
                   </div>
                   <p className="text-sm text-brand-darkBlue/70">
                     {user.companies?.name ? (

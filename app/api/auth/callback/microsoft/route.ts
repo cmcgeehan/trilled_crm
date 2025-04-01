@@ -1,7 +1,8 @@
 import { OUTLOOK_CONFIG } from '@/lib/oauth2/config'
-import { createRouteHandlerClient } from '@supabase/auth-helpers-nextjs'
+import { createServerClient } from '@supabase/ssr'
 import { cookies } from 'next/headers'
 import { NextRequest, NextResponse } from 'next/server'
+import type { CookieOptions } from '@supabase/ssr'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -161,7 +162,24 @@ export async function GET(request: NextRequest) {
     const userInfo = await graphResponse.json()
 
     // Get Supabase client
-    const supabase = createRouteHandlerClient({ cookies })
+    const cookieStore = await cookies()
+    const supabase = createServerClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+      {
+        cookies: {
+          get(name: string) {
+            return cookieStore.get(name)?.value
+          },
+          set(name: string, value: string, options: CookieOptions) {
+            cookieStore.set({ name, value, ...options })
+          },
+          remove(name: string, options: CookieOptions) {
+            cookieStore.set({ name, value: '', ...options })
+          },
+        },
+      }
+    )
     
     // Get current user
     const { data: { session }, error: sessionError } = await supabase.auth.getSession()

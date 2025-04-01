@@ -153,6 +153,9 @@ export interface Database {
           deleted_at: string | null
           organization_id: string | null
           position: string | null
+          lead_type: 'referral_partner' | 'potential_customer' | null
+          company_id: string | null
+          referral_company_id: string | null
         }
         Insert: {
           id?: string
@@ -170,6 +173,9 @@ export interface Database {
           deleted_at?: string | null
           organization_id?: string | null
           position?: string | null
+          lead_type?: 'referral_partner' | 'potential_customer' | null
+          company_id?: string | null
+          referral_company_id?: string | null
         }
         Update: {
           id?: string
@@ -187,6 +193,9 @@ export interface Database {
           deleted_at?: string | null
           organization_id?: string | null
           position?: string | null
+          lead_type?: 'referral_partner' | 'potential_customer' | null
+          company_id?: string | null
+          referral_company_id?: string | null
         }
         Relationships: [
           {

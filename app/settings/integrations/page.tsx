@@ -3,7 +3,7 @@
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { useCallback, useEffect, useState, Suspense } from "react"
-import { createClientComponentClient } from "@supabase/auth-helpers-nextjs"
+import { createBrowserClient } from "@supabase/ssr"
 import { useRouter, useSearchParams } from "next/navigation"
 import { Mail } from "lucide-react"
 import { Alert, AlertDescription } from "@/components/ui/alert"
@@ -14,7 +14,10 @@ type EmailIntegration = Database['public']['Tables']['email_integrations']['Row'
 function EmailIntegrationsContent() {
   const router = useRouter()
   const searchParams = useSearchParams()
-  const supabase = createClientComponentClient<Database>()
+  const supabase = createBrowserClient<Database>(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+  )
   const [integrations, setIntegrations] = useState<EmailIntegration[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)

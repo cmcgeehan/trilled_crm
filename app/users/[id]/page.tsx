@@ -126,6 +126,36 @@ export default function CustomerDetailPage({ params }: { params: Promise<{ id: s
   const scrollContainerRef = useRef<HTMLDivElement>(null)
   const [companies, setCompanies] = useState<Database['public']['Tables']['companies']['Row'][]>([])
   const [currentUser, setCurrentUser] = useState<Database['public']['Tables']['users']['Row'] | null>(null)
+  const [formData, setFormData] = useState({
+    first_name: customer?.first_name || "",
+    last_name: customer?.last_name || "",
+    email: customer?.email || "",
+    phone: customer?.phone || "",
+    position: customer?.position || "",
+    role: customer?.role || "lead",
+    status: customer?.status || "new",
+    owner_id: customer?.owner_id || null,
+    notes: customer?.notes || "",
+    lead_type: customer?.lead_type || null,
+  })
+
+  // Add this useEffect to update form data when customer changes
+  useEffect(() => {
+    if (customer) {
+      setFormData({
+        first_name: customer.first_name || "",
+        last_name: customer.last_name || "",
+        email: customer.email || "",
+        phone: customer.phone || "",
+        position: customer.position || "",
+        role: customer.role || "lead",
+        status: customer.status || "new",
+        owner_id: customer.owner_id || null,
+        notes: customer.notes || "",
+        lead_type: customer.lead_type || null,
+      })
+    }
+  }, [customer])
 
   const loadCompanies = useCallback(async () => {
     try {
@@ -250,7 +280,7 @@ export default function CustomerDetailPage({ params }: { params: Promise<{ id: s
         .from('users')
         .select(`
           *,
-          companies (
+          companies!company_id (
             id,
             name
           )
@@ -1300,8 +1330,8 @@ export default function CustomerDetailPage({ params }: { params: Promise<{ id: s
                       <Label htmlFor="first_name">First Name</Label>
                       <Input
                         id="first_name"
-                        value={editedCustomer?.first_name || ''}
-                        onChange={(e) => setEditedCustomer(prev => ({ ...prev!, first_name: e.target.value }))}
+                        value={formData.first_name}
+                        onChange={(e) => setFormData(prev => ({ ...prev, first_name: e.target.value }))}
                         className="mt-1"
                         disabled={!isEditable}
                       />
@@ -1310,8 +1340,8 @@ export default function CustomerDetailPage({ params }: { params: Promise<{ id: s
                       <Label htmlFor="last_name">Last Name</Label>
                       <Input
                         id="last_name"
-                        value={editedCustomer?.last_name || ''}
-                        onChange={(e) => setEditedCustomer(prev => ({ ...prev!, last_name: e.target.value }))}
+                        value={formData.last_name}
+                        onChange={(e) => setFormData(prev => ({ ...prev, last_name: e.target.value }))}
                         className="mt-1"
                         disabled={!isEditable}
                       />
@@ -1320,8 +1350,8 @@ export default function CustomerDetailPage({ params }: { params: Promise<{ id: s
                       <Label htmlFor="email">Email</Label>
                       <Input
                         id="email"
-                        value={editedCustomer?.email || ''}
-                        onChange={(e) => setEditedCustomer(prev => ({ ...prev!, email: e.target.value }))}
+                        value={formData.email}
+                        onChange={(e) => setFormData(prev => ({ ...prev, email: e.target.value }))}
                         className="mt-1"
                         disabled={!isEditable}
                       />
@@ -1330,8 +1360,8 @@ export default function CustomerDetailPage({ params }: { params: Promise<{ id: s
                       <Label htmlFor="phone">Phone</Label>
                       <Input
                         id="phone"
-                        value={editedCustomer?.phone || ''}
-                        onChange={(e) => setEditedCustomer(prev => ({ ...prev!, phone: e.target.value }))}
+                        value={formData.phone}
+                        onChange={(e) => setFormData(prev => ({ ...prev, phone: e.target.value }))}
                         className="mt-1"
                         disabled={!isEditable}
                       />
@@ -1340,7 +1370,7 @@ export default function CustomerDetailPage({ params }: { params: Promise<{ id: s
                       <Label htmlFor="linkedin">LinkedIn</Label>
                       <Input
                         id="linkedin"
-                        value={editedCustomer?.linkedin || ''}
+                        value={customer?.linkedin || ''}
                         onChange={(e) => setEditedCustomer(prev => ({ ...prev!, linkedin: e.target.value }))}
                         className="mt-1"
                         disabled={!isEditable}
@@ -1358,7 +1388,7 @@ export default function CustomerDetailPage({ params }: { params: Promise<{ id: s
                       <div className="mt-1">
                         <CompanyCombobox
                           companies={companies}
-                          value={editedCustomer?.company_id}
+                          value={customer?.company_id}
                           onChange={(value) => {
                             console.log('CompanyCombobox onChange:', value);
                             setEditedCustomer(prev => ({ ...prev!, company_id: value }));
@@ -1371,8 +1401,8 @@ export default function CustomerDetailPage({ params }: { params: Promise<{ id: s
                       <Label htmlFor="position">Position</Label>
                       <Input
                         id="position"
-                        value={editedCustomer?.position || ''}
-                        onChange={(e) => setEditedCustomer(prev => ({ ...prev!, position: e.target.value }))}
+                        value={formData.position}
+                        onChange={(e) => setFormData(prev => ({ ...prev, position: e.target.value }))}
                         className="mt-1"
                         disabled={!isEditable}
                       />
@@ -1389,9 +1419,8 @@ export default function CustomerDetailPage({ params }: { params: Promise<{ id: s
                     <div>
                       <Label htmlFor="role">Role</Label>
                       <Select
-                        value={editedCustomer?.role || ''}
-                        onValueChange={(value) => setEditedCustomer(prev => ({ ...prev!, role: value as UserRole }))}
-                        disabled={!isEditable}
+                        value={formData.role}
+                        onValueChange={(value) => setFormData(prev => ({ ...prev, role: value as UserRole }))}
                       >
                         <SelectTrigger id="role" className="mt-1">
                           <SelectValue placeholder="Select role" />
@@ -1399,30 +1428,51 @@ export default function CustomerDetailPage({ params }: { params: Promise<{ id: s
                         <SelectContent>
                           <SelectItem value="lead">Lead</SelectItem>
                           <SelectItem value="customer">Customer</SelectItem>
-                          <SelectItem value="agent">Agent</SelectItem>
-                          {['admin', 'super_admin'].includes(currentUserRole || '') && (
+                          {(currentUserRole === 'super_admin' || currentUserRole === 'admin') && (
+                            <SelectItem value="agent">Agent</SelectItem>
+                          )}
+                          {currentUserRole === 'super_admin' && (
                             <SelectItem value="admin">Admin</SelectItem>
                           )}
-                          {(currentUserRole === 'super_admin' || editedCustomer?.role === 'super_admin') && (
+                          {currentUserRole === 'super_admin' && (
                             <SelectItem value="super_admin">Super Admin</SelectItem>
                           )}
                         </SelectContent>
                       </Select>
                     </div>
+                    {formData.role === 'lead' && (
+                      <div className="space-y-2">
+                        <Label htmlFor="lead_type">Lead Type</Label>
+                        <Select
+                          value={formData.lead_type || ""}
+                          onValueChange={(value: 'referral_partner' | 'potential_customer' | "") => 
+                            setFormData(prev => ({ ...prev, lead_type: value || null }))
+                          }
+                        >
+                          <SelectTrigger>
+                            <SelectValue placeholder="Select lead type" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="potential_customer">Potential Customer</SelectItem>
+                            <SelectItem value="referral_partner">Referral Partner</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    )}
                     <div>
                       <Label htmlFor="status">Status</Label>
                       <Select
-                        value={editedCustomer?.status || ''}
-                        onValueChange={(value) => setEditedCustomer(prev => ({ ...prev!, status: value as UserStatus }))}
+                        value={formData.status}
+                        onValueChange={(value) => setFormData(prev => ({ ...prev, status: value as UserStatus }))}
                         disabled={!isEditable}
                       >
                         <SelectTrigger id="status" className="mt-1">
                           <SelectValue>
-                            {editedCustomer?.status === 'won' 
+                            {formData.status === 'won' 
                               ? 'Won'
-                              : editedCustomer?.status === 'lost'
+                              : formData.status === 'lost'
                                 ? 'Lost'
-                                : editedCustomer?.status?.split('_')
+                                : formData.status?.split('_')
                                     .map(word => word.charAt(0).toUpperCase() + word.slice(1))
                                     .join(' ') || 'Select status'
                             }
@@ -1441,8 +1491,8 @@ export default function CustomerDetailPage({ params }: { params: Promise<{ id: s
                       <Label htmlFor="owner">Owner</Label>
                       <OwnerCombobox
                         owners={agents}
-                        value={editedCustomer?.owner_id || null}
-                        onChange={(value) => setEditedCustomer(prev => ({ ...prev!, owner_id: value }))}
+                        value={formData.owner_id}
+                        onChange={(value) => setFormData(prev => ({ ...prev, owner_id: value }))}
                         disabled={!isEditable}
                       />
                     </div>
@@ -1456,8 +1506,8 @@ export default function CustomerDetailPage({ params }: { params: Promise<{ id: s
                     <Label htmlFor="notes">Additional Notes</Label>
                     <Textarea
                       id="notes"
-                      value={editedCustomer?.notes || ''}
-                      onChange={(e) => setEditedCustomer(prev => ({ ...prev!, notes: e.target.value }))}
+                      value={formData.notes}
+                      onChange={(e) => setFormData(prev => ({ ...prev, notes: e.target.value }))}
                       className="mt-1 h-32"
                       disabled={!isEditable}
                     />
@@ -1468,7 +1518,18 @@ export default function CustomerDetailPage({ params }: { params: Promise<{ id: s
             <div className="flex justify-end space-x-2 mt-4">
               {isEditable && (
                 <>
-                  <Button variant="outline" onClick={() => setEditedCustomer(customer)}>
+                  <Button variant="outline" onClick={() => setFormData({
+                    first_name: customer?.first_name || "",
+                    last_name: customer?.last_name || "",
+                    email: customer?.email || "",
+                    phone: customer?.phone || "",
+                    position: customer?.position || "",
+                    role: customer?.role || "lead",
+                    status: customer?.status || "new",
+                    owner_id: customer?.owner_id || null,
+                    notes: customer?.notes || "",
+                    lead_type: customer?.lead_type || null,
+                  })}>
                     Reset Changes
                   </Button>
                   <Button onClick={handleSaveCustomer} disabled={loading}>

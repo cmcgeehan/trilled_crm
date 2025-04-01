@@ -1,4 +1,4 @@
-import { createClientComponentClient } from '@supabase/auth-helpers-nextjs'
+import { createBrowserClient } from '@supabase/ssr'
 import { Database } from '@/types/supabase'
 
 // Debug: Log the URL being used (but not the key for security)
@@ -12,21 +12,26 @@ if (!process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY) {
 }
 
 // Create a single supabase client for interacting with your database
-export const supabase = createClientComponentClient<Database>({
-  options: {
-    realtime: {
-      timeout: 60000, // 60 seconds
-      params: {
-        eventsPerSecond: 10
-      }
+export const supabase = createBrowserClient<Database>(
+  process.env.NEXT_PUBLIC_SUPABASE_URL,
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
+  {
+    cookies: {
+      get(name) {
+        return document.cookie
+          .split('; ')
+          .find((row) => row.startsWith(`${name}=`))
+          ?.split('=')[1]
+      },
+      set(name, value, options) {
+        document.cookie = `${name}=${value}; path=${options.path}; max-age=${options.maxAge}`
+      },
+      remove(name, options) {
+        document.cookie = `${name}=; path=${options.path}; expires=Thu, 01 Jan 1970 00:00:00 GMT`
+      },
     },
-    global: {
-      headers: {
-        'x-my-custom-header': 'CRM application'
-      }
-    }
   }
-})
+)
 
 // Export the URL for verification purposes
 export const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL 

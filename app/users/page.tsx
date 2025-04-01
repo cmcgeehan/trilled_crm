@@ -58,92 +58,57 @@ export default function UsersPage() {
   const itemsPerPage = 20
 
   const loadUsers = useCallback(async () => {
-    setDataLoading(true)
     try {
-      // First get total count
-      let countQuery = supabase
-        .from('users')
-        .select('*', { count: 'exact', head: true })
-        .is('deleted_at', null)
-
-      if (currentOrganizationId) {
-        countQuery = countQuery.eq('organization_id', currentOrganizationId)
-      }
-
-      if (roleFilter) {
-        countQuery = countQuery.eq('role', roleFilter)
-      }
-
-      if (statusFilter) {
-        countQuery = countQuery.eq('status', statusFilter)
-      }
-
-      if (ownerFilter === 'unassigned') {
-        countQuery = countQuery.is('owner_id', null)
-      } else if (ownerFilter !== 'all') {
-        countQuery = countQuery.eq('owner_id', ownerFilter)
-      }
-
-      if (searchTerm) {
-        countQuery = countQuery.or(`first_name.ilike.%${searchTerm}%,last_name.ilike.%${searchTerm}%,email.ilike.%${searchTerm}%,phone.ilike.%${searchTerm}%`)
-      }
-
-      const { count, error: countError } = await countQuery
-
-      if (countError) {
-        console.error('Error getting count:', countError)
-        return
-      }
-
-      setTotalCount(count || 0)
-
-      // Then get paginated data
+      setDataLoading(true)
       let query = supabase
         .from('users')
         .select(`
           *,
-          companies (
+          companies!company_id (
             id,
             name
           )
         `)
         .is('deleted_at', null)
-        .order(sortField, { ascending: sortOrder === 'asc' })
+        .order('created_at', { ascending: false })
         .range((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage - 1)
 
-      if (currentOrganizationId) {
-        query = query.eq('organization_id', currentOrganizationId)
-      }
-
+      // Apply filters
       if (roleFilter) {
         query = query.eq('role', roleFilter)
       }
-
       if (statusFilter) {
         query = query.eq('status', statusFilter)
       }
-
-      if (ownerFilter === 'unassigned') {
-        query = query.is('owner_id', null)
-      } else if (ownerFilter !== 'all') {
+      if (ownerFilter && ownerFilter !== 'all') {
         query = query.eq('owner_id', ownerFilter)
       }
-
       if (searchTerm) {
-        query = query.or(`first_name.ilike.%${searchTerm}%,last_name.ilike.%${searchTerm}%,email.ilike.%${searchTerm}%,phone.ilike.%${searchTerm}%`)
+        query = query.or(`first_name.ilike.%${searchTerm}%,last_name.ilike.%${searchTerm}%,email.ilike.%${searchTerm}%`)
       }
 
-      const { data: users, error } = await query
+      // Apply organization filter for non-super admins
+      if (currentUserRole !== 'super_admin') {
+        query = query.eq('organization_id', currentOrganizationId)
+      }
 
-      if (error) throw error
-      setUsers(users || [])
-    } catch (error) {
-      console.error('Error loading users:', error)
-      toast.error('Failed to load users')
+      const { data, error, count } = await query
+
+      if (error) {
+        console.error('Error loading users:', error)
+        toast.error('Error loading users')
+        return
+      }
+
+      setUsers(data || [])
+      setTotalCount(count || 0)
+    } catch (err) {
+      console.error('Error loading users:', err)
+      toast.error('Error loading users')
     } finally {
       setDataLoading(false)
     }
-  }, [sortField, sortOrder, currentOrganizationId, roleFilter, statusFilter, ownerFilter, currentPage, itemsPerPage, searchTerm])
+  }, [currentPage, roleFilter, statusFilter, ownerFilter, searchTerm, currentUserRole, currentOrganizationId])
 
   const loadAgents = useCallback(async () => {
     try {

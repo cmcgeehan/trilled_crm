@@ -1,8 +1,9 @@
 'use client';
 
 import { useEffect, useState, Suspense } from 'react';
-import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useRouter } from 'next/navigation';
+import { createBrowserClient } from '@supabase/ssr';
+import { Database } from '@/types/supabase';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -12,44 +13,34 @@ import { toast } from 'sonner';
 function VerifyInviteContent() {
   const [loading, setLoading] = useState(true);
   const [password, setPassword] = useState('');
-  const [showPasswordForm, setShowPasswordForm] = useState(false);
   const router = useRouter();
-  const searchParams = useSearchParams();
-  const supabase = createClientComponentClient();
+  const supabase = createBrowserClient<Database>(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+  );
 
   useEffect(() => {
-    const verifyInvite = async () => {
-      try {
-        const token = searchParams?.get('token') || '';
-        const type = searchParams?.get('type') || '';
+    const verifyEmail = async () => {
+      const { searchParams } = new URL(window.location.href);
+      const token = searchParams.get('token');
+      const type = searchParams.get('type');
 
-        console.log('Verifying token:', { token, type });
-
-        if (!token) {
-          throw new Error('No token provided');
-        }
-
-        // Verify the invite token
-        const { error: verifyError } = await supabase.auth.verifyOtp({
+      if (token && type === 'email_verification') {
+        const { error } = await supabase.auth.verifyOtp({
           token_hash: token,
-          type: 'invite',
+          type: 'email',
         });
 
-        if (verifyError) {
-          throw verifyError;
+        if (error) {
+          console.error('Error verifying email:', error.message);
+        } else {
+          router.push('/');
         }
-
-        setShowPasswordForm(true);
-        setLoading(false);
-      } catch (error) {
-        console.error('Error verifying invite:', error);
-        toast.error('Invalid or expired invite link. Please request a new invite.');
-        router.push('/login');
       }
     };
 
-    verifyInvite();
-  }, [searchParams, router, supabase.auth]);
+    verifyEmail();
+  }, [router, supabase]);
 
   const handleSetPassword = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -72,7 +63,7 @@ function VerifyInviteContent() {
     }
   };
 
-  if (loading && !showPasswordForm) {
+  if (loading) {
     return (
       <div className="container flex items-center justify-center min-h-screen py-12">
         <p>Verifying invite...</p>

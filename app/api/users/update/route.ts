@@ -1,116 +1,66 @@
-import { createClient } from '@supabase/supabase-js'
+import { createServerClient } from '@supabase/ssr'
 import { cookies } from 'next/headers'
 import { NextResponse } from 'next/server'
-import { createRouteHandlerClient } from '@supabase/auth-helpers-nextjs'
+import type { CookieOptions } from '@supabase/ssr'
 
-// Create a Supabase client with the service role key for admin operations
-const adminClient = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!,
-  {
-    auth: {
-      autoRefreshToken: false,
-      persistSession: false
-    }
-  }
-)
+export const runtime = 'nodejs'
+export const dynamic = 'force-dynamic'
 
-export async function POST(request: Request) {
+export async function PUT(request: Request) {
   try {
-    const userData = await request.json()
+    const { userId, updates } = await request.json()
     
-    const cookieStore = cookies()
-    const supabase = createRouteHandlerClient({ cookies: () => cookieStore })
+    const cookieStore = await cookies()
+    const supabase = createServerClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+      {
+        cookies: {
+          get(name: string) {
+            return cookieStore.get(name)?.value
+          },
+          set(name: string, value: string, options: CookieOptions) {
+            cookieStore.set({ name, value, ...options })
+          },
+          remove(name: string, options: CookieOptions) {
+            cookieStore.set({ name, value: '', ...options })
+          },
+        },
+      }
+    )
     
     // Verify user is authenticated and has appropriate role
     const { data: { session } } = await supabase.auth.getSession()
     if (!session) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+      return new NextResponse('Unauthorized', { status: 401 })
     }
 
-    // Use admin client for fetching current user to avoid cookie issues
-    const { data: currentUser, error: currentUserError } = await adminClient
+    const { data: currentUser } = await supabase
       .from('users')
-      .select('role, organization_id')
+      .select('role')
       .eq('id', session.user.id)
       .single()
 
-    if (currentUserError || !currentUser || !['admin', 'super_admin', 'agent'].includes(currentUser.role)) {
-      return NextResponse.json({ error: 'Forbidden - Insufficient permissions' }, { status: 403 })
+    if (!currentUser || !['admin', 'super_admin'].includes(currentUser.role)) {
+      return new NextResponse('Forbidden', { status: 403 })
     }
 
-    // Get the user's current role before update using admin client
-    const { data: existingUser, error: existingUserError } = await adminClient
+    // Update the user
+    const { data: updatedUser, error } = await supabase
       .from('users')
-      .select('role, organization_id')
-      .eq('id', userData.id)
-      .single()
-
-    if (existingUserError || !existingUser) {
-      return NextResponse.json({ error: 'User not found' }, { status: 404 })
-    }
-
-    // Check role hierarchy permissions for role changes
-    if (userData.role && userData.role !== existingUser.role) {
-      // Super admins can update to any role except super_admin
-      if (currentUser.role === 'super_admin') {
-        if (userData.role === 'super_admin') {
-          return NextResponse.json({ error: 'Cannot create super_admin users' }, { status: 403 })
-        }
-      }
-      // Admins can only update to agent, lead, or customer
-      else if (currentUser.role === 'admin') {
-        if (!['agent', 'lead', 'customer'].includes(userData.role)) {
-          return NextResponse.json({ error: 'Admins can only update users to agent, lead, or customer roles' }, { status: 403 })
-        }
-      }
-      // Agents can only update to lead or customer
-      else if (currentUser.role === 'agent') {
-        if (!['lead', 'customer'].includes(userData.role)) {
-          return NextResponse.json({ error: 'Agents can only update users to lead or customer roles' }, { status: 403 })
-        }
-      }
-    }
-
-    // Check organization permissions
-    if (currentUser.role !== 'super_admin' && existingUser.organization_id !== currentUser.organization_id) {
-      return NextResponse.json({ error: 'Cannot update users from different organizations' }, { status: 403 })
-    }
-
-    // If admin or agent, can only update users in their organization
-    const updateData = {
-      first_name: userData.first_name,
-      last_name: userData.last_name,
-      email: userData.email,
-      phone: userData.phone,
-      position: userData.position,
-      role: userData.role,
-      status: userData.status,
-      company_id: userData.company_id,
-      owner_id: userData.owner_id,
-      notes: userData.notes
-    }
-
-    // Use admin client for the update operation
-    const { data: updatedUser, error: updateError } = await adminClient
-      .from('users')
-      .update(updateData)
-      .eq('id', userData.id)
+      .update(updates)
+      .eq('id', userId)
       .select()
       .single()
 
-    if (updateError) {
-      console.error('Error updating user:', updateError)
-      return NextResponse.json({ error: updateError.message }, { status: 500 })
-    }
-
-    if (!updatedUser) {
-      return NextResponse.json({ error: 'Failed to update user' }, { status: 404 })
+    if (error) {
+      console.error('Error updating user:', error)
+      return new NextResponse('Internal Server Error', { status: 500 })
     }
 
     return NextResponse.json(updatedUser)
   } catch (error) {
-    console.error('Error in update route:', error)
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
+    console.error('Error in users update route:', error)
+    return new NextResponse('Internal Server Error', { status: 500 })
   }
 } 
