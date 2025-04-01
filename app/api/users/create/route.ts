@@ -148,10 +148,10 @@ export async function POST(request: Request) {
     if (['lead', 'customer'].includes(userData.role)) {
       const followUpDates = calculateFollowUpDates(new Date(), userData.role)
       const followUpsToCreate = followUpDates.map(date => ({
-        date: date.toISOString(),
+        due_date: date.toISOString(),
         type: 'email',
         user_id: newUser.id,
-        completed: false,
+        completed_at: null,
         next_follow_up_id: null
       }))
 

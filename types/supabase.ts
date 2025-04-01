@@ -139,63 +139,66 @@ export interface Database {
       users: {
         Row: {
           id: string
-          email: string | null
-          phone: string | null
+          email: string
           first_name: string | null
           last_name: string | null
-          role: 'lead' | 'customer' | 'agent' | 'admin' | 'super_admin'
+          role: string
           status: string
+          position: string | null
+          phone: string | null
+          notes: string | null
+          owner_id: string | null
+          company_id: string | null
+          referral_company_id: string | null
+          organization_id: string | null
+          lead_type: "referral_partner" | "potential_customer" | null
           lost_reason: string | null
           lost_at: string | null
-          owner_id: string | null
           created_at: string
           updated_at: string
           deleted_at: string | null
-          organization_id: string | null
-          position: string | null
-          lead_type: 'referral_partner' | 'potential_customer' | null
-          company_id: string | null
-          referral_company_id: string | null
         }
         Insert: {
           id?: string
-          email?: string | null
-          phone?: string | null
+          email: string
           first_name?: string | null
           last_name?: string | null
-          role?: 'lead' | 'customer' | 'agent' | 'admin' | 'super_admin'
+          role?: string
           status?: string
+          position?: string | null
+          phone?: string | null
+          notes?: string | null
+          owner_id?: string | null
+          company_id?: string | null
+          referral_company_id?: string | null
+          organization_id?: string | null
+          lead_type?: "referral_partner" | "potential_customer" | null
           lost_reason?: string | null
           lost_at?: string | null
-          owner_id?: string | null
           created_at?: string
           updated_at?: string
           deleted_at?: string | null
-          organization_id?: string | null
-          position?: string | null
-          lead_type?: 'referral_partner' | 'potential_customer' | null
-          company_id?: string | null
-          referral_company_id?: string | null
         }
         Update: {
           id?: string
-          email?: string | null
-          phone?: string | null
+          email?: string
           first_name?: string | null
           last_name?: string | null
-          role?: 'lead' | 'customer' | 'agent' | 'admin' | 'super_admin'
+          role?: string
           status?: string
+          position?: string | null
+          phone?: string | null
+          notes?: string | null
+          owner_id?: string | null
+          company_id?: string | null
+          referral_company_id?: string | null
+          organization_id?: string | null
+          lead_type?: "referral_partner" | "potential_customer" | null
           lost_reason?: string | null
           lost_at?: string | null
-          owner_id?: string | null
           created_at?: string
           updated_at?: string
           deleted_at?: string | null
-          organization_id?: string | null
-          position?: string | null
-          lead_type?: 'referral_partner' | 'potential_customer' | null
-          company_id?: string | null
-          referral_company_id?: string | null
         }
         Relationships: [
           {
@@ -253,41 +256,38 @@ export interface Database {
         Row: {
           id: string
           created_at: string
+          date: string
+          type: string
           user_id: string
-          title: string
-          description: string | null
-          date: string | null
-          completed: boolean
           completed_at: string | null
-          deleted_at: string | null
           next_follow_up_id: string | null
-          type: string | null
+          notes: string | null
+          updated_at: string
+          deleted_at: string | null
         }
         Insert: {
           id?: string
           created_at?: string
+          date: string
+          type: string
           user_id: string
-          title: string
-          description?: string | null
-          date?: string | null
-          completed?: boolean
           completed_at?: string | null
-          deleted_at?: string | null
           next_follow_up_id?: string | null
-          type?: string | null
+          notes?: string | null
+          updated_at?: string
+          deleted_at?: string | null
         }
         Update: {
           id?: string
           created_at?: string
+          date?: string
+          type?: string
           user_id?: string
-          title?: string
-          description?: string | null
-          date?: string | null
-          completed?: boolean
           completed_at?: string | null
-          deleted_at?: string | null
           next_follow_up_id?: string | null
-          type?: string | null
+          notes?: string | null
+          updated_at?: string
+          deleted_at?: string | null
         }
         Relationships: [
           {
@@ -307,48 +307,30 @@ export interface Database {
       companies: {
         Row: {
           id: string
-          created_at: string
-          name: string | null
+          name: string
           type: string | null
+          organization_id: string | null
+          created_at: string
+          updated_at: string
           deleted_at: string | null
-          street_address: string | null
-          neighborhood: string | null
-          city: string | null
-          state: string | null
-          postal_code: string | null
-          country: string | null
-          lost_reason: string | null
-          other_reason: string | null
         }
         Insert: {
           id?: string
-          created_at?: string
-          name?: string | null
+          name: string
           type?: string | null
+          organization_id?: string | null
+          created_at?: string
+          updated_at?: string
           deleted_at?: string | null
-          street_address?: string | null
-          neighborhood?: string | null
-          city?: string | null
-          state?: string | null
-          postal_code?: string | null
-          country?: string | null
-          lost_reason?: string | null
-          other_reason?: string | null
         }
         Update: {
           id?: string
-          created_at?: string
-          name?: string | null
+          name?: string
           type?: string | null
+          organization_id?: string | null
+          created_at?: string
+          updated_at?: string
           deleted_at?: string | null
-          street_address?: string | null
-          neighborhood?: string | null
-          city?: string | null
-          state?: string | null
-          postal_code?: string | null
-          country?: string | null
-          lost_reason?: string | null
-          other_reason?: string | null
         }
         Relationships: []
       }
@@ -356,7 +338,7 @@ export interface Database {
         Row: {
           id: string
           user_id: string
-          provider: 'gmail' | 'outlook'
+          provider: string
           refresh_token: string
           access_token: string | null
           token_expires_at: string | null
@@ -368,7 +350,7 @@ export interface Database {
         Insert: {
           id?: string
           user_id: string
-          provider: 'gmail' | 'outlook'
+          provider: string
           refresh_token: string
           access_token?: string | null
           token_expires_at?: string | null
@@ -380,7 +362,7 @@ export interface Database {
         Update: {
           id?: string
           user_id?: string
-          provider?: 'gmail' | 'outlook'
+          provider?: string
           refresh_token?: string
           access_token?: string | null
           token_expires_at?: string | null
@@ -398,9 +380,158 @@ export interface Database {
           }
         ]
       }
+      vob_records: {
+        Row: {
+          id: string
+          user_id: string
+          version: number
+          verified_by: string
+          created_date: string
+          reference_id: string
+          rep_spoke_to: string
+          relationship_to_subscriber: string
+          dependent_ages: string | null
+          subscriber_address: string
+          cob_info: string | null
+          plan_type: string
+          policy_type: string
+          subscriber_name: string
+          plan_year: string
+          funding_type: string
+          effective_date: string
+          termination_date: string | null
+          payment_destination: "facility" | "patient"
+          deductible: number | null
+          deductible_met: number | null
+          out_of_pocket: number | null
+          out_of_pocket_met: number | null
+          coinsurance: number | null
+          copay: number | null
+          deductible_applies_to_oop: boolean
+          cross_accumulate: boolean
+          op_coverage: boolean
+          iop_coverage: boolean
+          telehealth_coverage: boolean
+          reimbursement_type: string | null
+          multi_plan: boolean
+          notes: string | null
+          preauth_reference_number: string | null
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          user_id: string
+          version?: number
+          verified_by: string
+          created_date?: string
+          reference_id: string
+          rep_spoke_to: string
+          relationship_to_subscriber: string
+          dependent_ages?: string | null
+          subscriber_address: string
+          cob_info?: string | null
+          plan_type: string
+          policy_type: string
+          subscriber_name: string
+          plan_year: string
+          funding_type: string
+          effective_date: string
+          termination_date?: string | null
+          payment_destination: "facility" | "patient"
+          deductible?: number | null
+          deductible_met?: number | null
+          out_of_pocket?: number | null
+          out_of_pocket_met?: number | null
+          coinsurance?: number | null
+          copay?: number | null
+          deductible_applies_to_oop?: boolean
+          cross_accumulate?: boolean
+          op_coverage?: boolean
+          iop_coverage?: boolean
+          telehealth_coverage?: boolean
+          reimbursement_type?: string | null
+          multi_plan?: boolean
+          notes?: string | null
+          preauth_reference_number?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          user_id?: string
+          version?: number
+          verified_by?: string
+          created_date?: string
+          reference_id?: string
+          rep_spoke_to?: string
+          relationship_to_subscriber?: string
+          dependent_ages?: string | null
+          subscriber_address?: string
+          cob_info?: string | null
+          plan_type?: string
+          policy_type?: string
+          subscriber_name?: string
+          plan_year?: string
+          funding_type?: string
+          effective_date?: string
+          termination_date?: string | null
+          payment_destination?: "facility" | "patient"
+          deductible?: number | null
+          deductible_met?: number | null
+          out_of_pocket?: number | null
+          out_of_pocket_met?: number | null
+          coinsurance?: number | null
+          copay?: number | null
+          deductible_applies_to_oop?: boolean
+          cross_accumulate?: boolean
+          op_coverage?: boolean
+          iop_coverage?: boolean
+          telehealth_coverage?: boolean
+          reimbursement_type?: string | null
+          multi_plan?: boolean
+          notes?: string | null
+          preauth_reference_number?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+      }
+      vob_covered_codes: {
+        Row: {
+          id: string
+          vob_record_id: string
+          code: number
+          description: string
+          covered_for_telehealth: boolean
+          authorization_required: boolean
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          vob_record_id: string
+          code: number
+          description: string
+          covered_for_telehealth?: boolean
+          authorization_required?: boolean
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          vob_record_id?: string
+          code?: number
+          description?: string
+          covered_for_telehealth?: boolean
+          authorization_required?: boolean
+          created_at?: string
+        }
+      }
     }
-    Views: {}
-    Functions: {}
+    Views: {
+      [_ in never]: never
+    }
+    Functions: {
+      [_ in never]: never
+    }
     Enums: {
       lead_status: "new" | "needs_action" | "follow_up" | "awaiting_response" | "closed_won" | "closed_lost"
       follow_up_type: "email" | "sms" | "call" | "meeting" | "tour"

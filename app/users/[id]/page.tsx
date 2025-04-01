@@ -26,6 +26,7 @@ import { OwnerCombobox } from "@/components/ui/owner-combobox"
 import { MessageInput } from "@/components/message-input"
 import { ReferralPartnerCompanyCombobox } from "@/components/ui/referral-partner-company-combobox"
 import { PotentialCustomerCompanyCombobox } from "@/components/ui/potential-customer-company-combobox"
+import { VOBForm } from "@/components/vob-form"
 
 type UserRole = Database['public']['Tables']['users']['Row']['role']
 type FollowUpType = 'email' | 'sms' | 'call' | 'meeting' | 'tour'
@@ -50,8 +51,11 @@ type Agent = {
   role: string;
 }
 
-type FollowUp = Omit<Database['public']['Tables']['follow_ups']['Row'], 'type'> & {
-  type: FollowUpType | null;
+type FollowUp = Database['public']['Tables']['follow_ups']['Row'] & {
+  type: FollowUpType
+  completed?: boolean
+  lost_at?: string | null
+  lost_reason?: string | null
 }
 
 type Case = {
@@ -234,6 +238,8 @@ export default function CustomerDetailPage({ params }: { params: Promise<{ id: s
   }, []);
 
   const loadFollowUps = useCallback(async () => {
+    if (!id) return
+
     try {
       const { data: allFollowUps, error } = await supabase
         .from('follow_ups')
@@ -291,7 +297,7 @@ export default function CustomerDetailPage({ params }: { params: Promise<{ id: s
     } catch (err) {
       console.error('Error loading follow-ups:', err)
     }
-  }, [id])
+  }, [id, supabase])
 
   const loadCustomer = useCallback(async () => {
     try {
@@ -491,11 +497,11 @@ export default function CustomerDetailPage({ params }: { params: Promise<{ id: s
     checkSession()
   }, [router, customer])
 
-  const loadAgents = async () => {
+  const loadAgents = useCallback(async () => {
     try {
       const { data, error } = await supabase
         .from('users')
-        .select('id, email, first_name, last_name, role')
+        .select('id, email, first_name, role')
         .in('role', ['agent', 'admin', 'super_admin'])
         .is('deleted_at', null)
       
@@ -504,7 +510,7 @@ export default function CustomerDetailPage({ params }: { params: Promise<{ id: s
     } catch (err) {
       console.error('Error loading agents:', err)
     }
-  }
+  }, [])
 
   useEffect(() => {
     const tab = searchParams?.get("tab") || ''
@@ -822,93 +828,39 @@ export default function CustomerDetailPage({ params }: { params: Promise<{ id: s
     }
   }
 
-  const handleUpdateFollowUp = async (updates: Partial<FollowUp>) => {
-    if (!selectedFollowUp || !customer) return
+  const handleUpdateFollowUp = async (followUp: FollowUp, updates: Partial<FollowUp>) => {
+    setIsUpdatingFollowUps(true)
+    setError(null)
 
     try {
-      setIsUpdatingFollowUps(true)
-      const updateData: Database['public']['Tables']['follow_ups']['Update'] = {}
-      
-      // Only update type if it's provided in updates
-      if (updates.type) {
-        updateData.type = updates.type
+      const updateData: Partial<FollowUp> = {
+        type: updates.type || followUp?.type,
+        notes: updates.notes || followUp?.notes,
+        completed_at: updates.completed_at || null
       }
-      
+
       // Handle date updates
       if (updates.date) {
         updateData.date = updates.date
 
         // Find all follow-ups after the selected one
-        const selectedIndex = followUps.findIndex(fu => fu.id === selectedFollowUp.id)
-        if (selectedIndex !== -1 && selectedFollowUp.date) {
-          const subsequentFollowUps = followUps.slice(selectedIndex + 1)
-          console.log('Found subsequent follow-ups:', subsequentFollowUps)
-          
-          if (subsequentFollowUps.length > 0) {
-            // Calculate the time difference between the old and new date
-            const oldDate = new Date(selectedFollowUp.date)
-            const newDate = new Date(updates.date)
-            const timeDifference = newDate.getTime() - oldDate.getTime()
-            console.log('Time difference:', timeDifference, 'ms')
+        const { data: laterFollowUps } = await supabase
+          .from('follow_ups')
+          .select('*')
+          .eq('user_id', id)
+          .gt('date', followUp.date)
+          .order('date', { ascending: true })
 
-            // Update each follow-up in sequence
-            for (const followUp of subsequentFollowUps) {
-              if (!followUp.date) continue
-              
-              const currentDate = new Date(followUp.date)
-              const newFollowUpDate = new Date(currentDate.getTime() + timeDifference)
-              console.log(`Updating follow-up ${followUp.id} from ${followUp.date} to ${newFollowUpDate.toISOString()}`)
-              
-              const { error: updateError } = await supabase
-                .from('follow_ups')
-                .update({ date: newFollowUpDate.toISOString() })
-                .eq('id', followUp.id)
-
-              if (updateError) {
-                console.error(`Error updating follow-up ${followUp.id}:`, updateError)
-                throw updateError
-              }
-            }
-          }
-        }
-      }
-      
-      // Handle completion status separately
-      if ('completed' in updates) {
-        updateData.completed_at = updates.completed ? new Date().toISOString() : null
-
-        // If marking as complete and user is a lead, update their status to awaiting_response
-        if (updates.completed && customer.role === 'lead') {
-          const { error: userError } = await supabase
-            .from('users')
-            .update({ status: 'awaiting_response' })
-            .eq('id', customer.id)
-
-          if (userError) throw userError
-
-          // Fetch the updated user data
-          const { data: updatedUser, error: fetchError } = await supabase
-            .from('users')
-            .select(`
-              *,
-              companies (
-                id,
-                name
-              )
-            `)
-            .eq('id', customer.id)
-            .single()
-
-          if (fetchError) throw fetchError
-
-          if (updatedUser) {
-            const updatedCustomer = {
-              ...updatedUser,
-              company_id: updatedUser.companies?.id
-            }
-            // Update both customer and editedCustomer states
-            setCustomer(updatedCustomer)
-            setEditedCustomer(updatedCustomer)
+        if (laterFollowUps) {
+          // Update each follow-up's date to be 1 day after the previous one
+          for (let i = 0; i < laterFollowUps.length; i++) {
+            const currentDate = new Date(updates.date)
+            currentDate.setDate(currentDate.getDate() + i + 1)
+            
+            await supabase
+              .from('follow_ups')
+              .update({ date: currentDate.toISOString() })
+              .eq('id', laterFollowUps[i].id)
           }
         }
       }
@@ -917,34 +869,33 @@ export default function CustomerDetailPage({ params }: { params: Promise<{ id: s
       const { error } = await supabase
         .from('follow_ups')
         .update(updateData)
-        .eq('id', selectedFollowUp.id)
+        .eq('id', followUp.id)
 
       if (error) throw error
 
+      // Refresh the list
       await loadFollowUps()
     } catch (err) {
       console.error('Error updating follow-up:', err)
+      setError(err instanceof Error ? err.message : 'Failed to update follow-up')
     } finally {
       setIsUpdatingFollowUps(false)
     }
   }
 
-  const createFollowUp = async (date: Date, type: FollowUpType = 'email') => {
+  const createFollowUp = async () => {
     if (!customer) return
 
     try {
-      // Get the expected sequence dates
       const sequenceDates = calculateFollowUpDates(new Date(customer.created_at), customer.role as 'lead' | 'customer')
-      
-      // Create all follow-ups in the sequence
-      const followUpsToCreate = sequenceDates.map((sequenceDate) => ({
+      const followUpsToCreate = sequenceDates.map(sequenceDate => ({
         user_id: customer.id,
         date: sequenceDate.toISOString(),
-        completed: false,
-        type: type
+        type: 'email',
+        completed_at: null,
+        next_follow_up_id: null
       }))
 
-      // Insert all follow-ups
       const { data: newFollowUps, error } = await supabase
         .from('follow_ups')
         .insert(followUpsToCreate)
@@ -953,19 +904,17 @@ export default function CustomerDetailPage({ params }: { params: Promise<{ id: s
       if (error) throw error
 
       // Update next_follow_up_id links
-      if (newFollowUps) {
-        for (let i = 0; i < newFollowUps.length - 1; i++) {
-          await supabase
-            .from('follow_ups')
-            .update({ next_follow_up_id: newFollowUps[i + 1].id })
-            .eq('id', newFollowUps[i].id)
-        }
+      for (let i = 0; i < newFollowUps.length - 1; i++) {
+        await supabase
+          .from('follow_ups')
+          .update({ next_follow_up_id: newFollowUps[i + 1].id })
+          .eq('id', newFollowUps[i].id)
       }
 
-      // Reload follow-ups to get the updated list
       await loadFollowUps()
     } catch (err) {
-      console.error('Error creating follow-up sequence:', err)
+      console.error('Error creating follow-ups:', err)
+      setError(err instanceof Error ? err.message : 'Failed to create follow-ups')
     }
   }
 
@@ -1240,7 +1189,7 @@ export default function CustomerDetailPage({ params }: { params: Promise<{ id: s
                   Days: {getExpectedSequence(customer.role as 'lead' | 'customer').join(', ')}
                 </p>
                 <Button 
-                  onClick={() => createFollowUp(new Date(), 'email')}
+                  onClick={() => createFollowUp()}
                   className="mt-4"
                 >
                   Create Follow-up Sequence
@@ -1273,14 +1222,14 @@ export default function CustomerDetailPage({ params }: { params: Promise<{ id: s
                         disabled={isUpdatingFollowUps}
                       >
                         <Calendar className="mr-2 h-4 w-4" />
-                        {selectedFollowUp.date ? format(new Date(selectedFollowUp.date), "PPP") : 'No date set'}
+                        {formatDateSafe(selectedFollowUp.date)}
                       </Button>
                     </PopoverTrigger>
                     <PopoverContent className="w-auto p-0">
                       <CalendarComponent
                         mode="single"
                         selected={selectedFollowUp.date ? new Date(selectedFollowUp.date) : undefined}
-                        onSelect={(date) => date && handleUpdateFollowUp({ date: date.toISOString() })}
+                        onSelect={(date) => date && handleUpdateFollowUp(selectedFollowUp, { date: date.toISOString() })}
                         initialFocus
                         disabled={isUpdatingFollowUps}
                       />
@@ -1291,7 +1240,7 @@ export default function CustomerDetailPage({ params }: { params: Promise<{ id: s
                   <Label htmlFor="followup-type">Type</Label>
                   <Select
                     value={selectedFollowUp.type || undefined}
-                    onValueChange={(value) => handleUpdateFollowUp({ type: value as FollowUpType })}
+                    onValueChange={(value) => handleUpdateFollowUp(selectedFollowUp, { type: value as FollowUpType })}
                     disabled={isUpdatingFollowUps}
                   >
                     <SelectTrigger id="followup-type" className={isUpdatingFollowUps ? 'opacity-50' : ''}>
@@ -1310,7 +1259,7 @@ export default function CustomerDetailPage({ params }: { params: Promise<{ id: s
                   <Checkbox
                     id="followup-completed"
                     checked={!!selectedFollowUp?.completed_at}
-                    onCheckedChange={(checked) => handleUpdateFollowUp({ completed: checked as boolean })}
+                    onCheckedChange={(checked) => handleUpdateFollowUp(selectedFollowUp, { completed_at: checked ? new Date().toISOString() : null })}
                     disabled={isUpdatingFollowUps}
                     className={isUpdatingFollowUps ? 'opacity-50' : ''}
                   />
@@ -1334,6 +1283,9 @@ export default function CustomerDetailPage({ params }: { params: Promise<{ id: s
           </TabsTrigger>
           <TabsTrigger value="cases" className="flex-1 data-[state=active]:bg-white data-[state=active]:shadow-sm">
             Cases
+          </TabsTrigger>
+          <TabsTrigger value="vob" className="flex-1 data-[state=active]:bg-white data-[state=active]:shadow-sm">
+            VOB
           </TabsTrigger>
         </TabsList>
         <TabsContent value="info" className="p-6">
@@ -1719,9 +1671,10 @@ export default function CustomerDetailPage({ params }: { params: Promise<{ id: s
             )}
           </div>
         </TabsContent>
+        <TabsContent value="vob" className="p-6">
+          <VOBForm userId={id} />
+        </TabsContent>
       </Tabs>
     </div>
   )
 }
-
-

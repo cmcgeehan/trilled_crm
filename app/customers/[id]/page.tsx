@@ -22,6 +22,7 @@ import { supabase } from "@/lib/supabase"
 import { Database } from "@/types/supabase"
 import { use } from "react"
 import { toast } from "react-hot-toast"
+import { Calendar as CalendarIcon } from "lucide-react"
 
 type UserStatus = Database['public']['Tables']['users']['Row']['status']
 type UserRole = Database['public']['Tables']['users']['Row']['role']
@@ -33,14 +34,24 @@ type Agent = {
 
 type Customer = Database['public']['Tables']['users']['Row'] & {
   name?: string;
-  company?: string;
+  company?: string | null;
+  lost_at?: string | null;
   lost_reason?: string | null;
-  other_reason?: string | null;
-  notes?: string | null;
 }
 
-type FollowUp = Database['public']['Tables']['follow_ups']['Row'] & {
-  type: string | null;
+type FollowUpType = Database['public']['Tables']['follow_ups']['Row']['type']
+
+type FollowUp = {
+  id: string
+  user_id: string
+  type: FollowUpType
+  date: string
+  completed_at: string | null
+  notes: string | null
+  created_at: string
+  updated_at: string
+  deleted_at: string | null
+  next_follow_up_id: string | null
 }
 
 type Case = {
@@ -127,64 +138,26 @@ export default function CustomerDetailPage({ params }: { params: Promise<{ id: s
   const scrollContainerRef = useRef<HTMLDivElement>(null)
 
   const loadFollowUps = useCallback(async () => {
+    if (!customer?.id) return
+
     try {
-      const { data: allFollowUps, error } = await supabase
+      const { data: followUps, error } = await supabase
         .from('follow_ups')
         .select('*')
-        .eq('user_id', id)
+        .eq('user_id', customer.id)
         .is('deleted_at', null)
         .order('date', { ascending: true })
 
-      if (error) throw error
-
-      if (!allFollowUps) {
-        setFollowUps([])
+      if (error) {
+        console.error('Error loading follow-ups:', error)
         return
       }
 
-      // Find the first follow-up (one with no previous follow-up pointing to it)
-      const followUpMap = new Map(allFollowUps.map(fu => [fu.id, fu]))
-      const hasIncomingEdge = new Set(allFollowUps.map(fu => fu.next_follow_up_id).filter(Boolean))
-      const firstFollowUp = allFollowUps.find(fu => !hasIncomingEdge.has(fu.id))
-
-      if (!firstFollowUp) {
-        // If no first follow-up found (shouldn't happen), fall back to date ordering
-        const sortedFollowUps = allFollowUps
-          .sort((a, b) => {
-            const dateA = a.date ? new Date(a.date).getTime() : 0
-            const dateB = b.date ? new Date(b.date).getTime() : 0
-            return dateA - dateB
-          })
-          .map(fu => ({
-            ...fu,
-            type: fu.type || 'email'
-          }))
-        setFollowUps(sortedFollowUps)
-        return
-      }
-
-      // Build the ordered list by following the next_follow_up_id links
-      const orderedFollowUps: FollowUp[] = []
-      let current: typeof firstFollowUp | null = firstFollowUp
-      while (current) {
-        orderedFollowUps.push({
-          ...current,
-          type: current.type || 'email'
-        })
-        current = current.next_follow_up_id ? followUpMap.get(current.next_follow_up_id) || null : null
-      }
-
-      setFollowUps(orderedFollowUps)
-      
-      // Select the next incomplete follow-up
-      const nextFollowUp = orderedFollowUps.find(fu => !fu.completed_at)
-      if (nextFollowUp) {
-        setSelectedFollowUp(nextFollowUp)
-      }
-    } catch (err) {
-      console.error('Error loading follow-ups:', err)
+      setFollowUps(followUps || [])
+    } catch (error) {
+      console.error('Error loading follow-ups:', error)
     }
-  }, [id])
+  }, [customer?.id])
 
   const loadCustomer = useCallback(async () => {
     try {
@@ -266,7 +239,7 @@ export default function CustomerDetailPage({ params }: { params: Promise<{ id: s
   useEffect(() => {
     if (scrollContainerRef.current) {
       const scrollContainer = scrollContainerRef.current
-      const nextFollowUpIndex = followUps.findIndex((fu) => !fu.completed)
+      const nextFollowUpIndex = followUps.findIndex((fu) => !fu.completed_at)
       const scrollToIndex = Math.max(0, nextFollowUpIndex - 1)
       scrollContainer.scrollLeft = scrollToIndex * 120
     }
@@ -333,13 +306,43 @@ export default function CustomerDetailPage({ params }: { params: Promise<{ id: s
   const handleUpdateFollowUp = async (updates: Partial<FollowUp>) => {
     if (!selectedFollowUp) return
 
+    setIsUpdatingFollowUps(true)
+    setError(null)
+
     try {
-      setIsUpdatingFollowUps(true)
-      const updateData: Database['public']['Tables']['follow_ups']['Update'] = {
-        type: updates.type || null,
-        completed_at: updates.completed ? new Date().toISOString() : null
+      const updateData: Partial<FollowUp> = {
+        type: updates.type,
+        notes: updates.notes,
+        completed_at: updates.completed_at || null
       }
 
+      // Handle date updates
+      if (updates.date) {
+        updateData.date = updates.date
+
+        // Find all follow-ups after the selected one
+        const { data: laterFollowUps } = await supabase
+          .from('follow_ups')
+          .select('*')
+          .eq('user_id', id)
+          .gt('date', selectedFollowUp?.date || '')
+          .order('date', { ascending: true })
+
+        if (laterFollowUps) {
+          // Update each follow-up's date to be 1 day after the previous one
+          for (let i = 0; i < laterFollowUps.length; i++) {
+            const currentDate = new Date(updates.date)
+            currentDate.setDate(currentDate.getDate() + i + 1)
+            
+            await supabase
+              .from('follow_ups')
+              .update({ date: currentDate.toISOString() })
+              .eq('id', laterFollowUps[i].id)
+          }
+        }
+      }
+
+      // Update the selected follow-up
       const { error } = await supabase
         .from('follow_ups')
         .update(updateData)
@@ -347,9 +350,11 @@ export default function CustomerDetailPage({ params }: { params: Promise<{ id: s
 
       if (error) throw error
 
+      // Refresh the follow-ups list
       await loadFollowUps()
     } catch (err) {
       console.error('Error updating follow-up:', err)
+      setError('Failed to update follow-up')
     } finally {
       setIsUpdatingFollowUps(false)
     }
@@ -476,7 +481,7 @@ export default function CustomerDetailPage({ params }: { params: Promise<{ id: s
                       key={followUp.id}
                       className={`flex-shrink-0 flex flex-col items-center justify-center w-28 h-32 border rounded-md cursor-pointer
                         ${selectedFollowUp?.id === followUp.id ? "bg-blue-100 border-blue-500" : "bg-white"}
-                        ${followUp.completed ? "opacity-50" : ""}
+                        ${followUp.completed_at ? "opacity-50" : ""}
                         ${isUpdatingFollowUps ? "opacity-50 cursor-not-allowed" : ""}`}
                       onClick={() => !isUpdatingFollowUps && handleSelectFollowUp(followUp)}
                     >
@@ -492,7 +497,7 @@ export default function CustomerDetailPage({ params }: { params: Promise<{ id: s
                       <Badge variant="secondary" className="mt-1">
                         {followUp.type}
                       </Badge>
-                      {followUp.completed && <Check className="text-green-500 mt-1" />}
+                      {followUp.completed_at && <Check className="text-green-500 mt-1" />}
                     </div>
                   )
                 })}
@@ -556,22 +561,17 @@ export default function CustomerDetailPage({ params }: { params: Promise<{ id: s
                   <Label>Date</Label>
                   <Popover>
                     <PopoverTrigger asChild>
-                      <Button 
-                        variant={"outline"} 
-                        className={`w-full justify-start text-left font-normal ${isUpdatingFollowUps ? 'opacity-50' : ''}`}
-                        disabled={isUpdatingFollowUps}
-                      >
-                        <Calendar className="mr-2 h-4 w-4" />
-                        {formatDateSafe(selectedFollowUp.date)}
+                      <Button variant="outline" className="w-full justify-start text-left font-normal">
+                        <CalendarIcon className="mr-2 h-4 w-4" />
+                        {formatDateSafe(selectedFollowUp?.date)}
                       </Button>
                     </PopoverTrigger>
                     <PopoverContent className="w-auto p-0">
                       <CalendarComponent
                         mode="single"
-                        selected={selectedFollowUp.date ? new Date(selectedFollowUp.date) : undefined}
+                        selected={selectedFollowUp?.date ? new Date(selectedFollowUp.date) : undefined}
                         onSelect={(date) => date && handleUpdateFollowUp({ date: date.toISOString() })}
                         initialFocus
-                        disabled={isUpdatingFollowUps}
                       />
                     </PopoverContent>
                   </Popover>
@@ -598,8 +598,8 @@ export default function CustomerDetailPage({ params }: { params: Promise<{ id: s
                 <div className="flex items-center space-x-2">
                   <Checkbox
                     id="followup-completed"
-                    checked={selectedFollowUp.completed}
-                    onCheckedChange={(checked) => handleUpdateFollowUp({ completed: checked as boolean })}
+                    checked={!!selectedFollowUp.completed_at}
+                    onCheckedChange={(checked) => handleUpdateFollowUp({ completed_at: checked ? new Date().toISOString() : null })}
                     disabled={isUpdatingFollowUps}
                     className={isUpdatingFollowUps ? 'opacity-50' : ''}
                   />
