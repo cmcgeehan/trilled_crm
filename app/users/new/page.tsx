@@ -9,8 +9,9 @@ import { Textarea } from "@/components/ui/textarea"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { supabase } from "@/lib/supabase"
 import { Database } from "@/types/supabase"
-import { CompanyCombobox } from "@/components/ui/company-combobox"
 import { OwnerCombobox } from "@/components/ui/owner-combobox"
+import { ReferralPartnerCompanyCombobox } from "@/components/ui/referral-partner-company-combobox"
+import { PotentialCustomerCompanyCombobox } from "@/components/ui/potential-customer-company-combobox"
 
 type UserRole = 'lead' | 'customer' | 'agent' | 'admin' | 'super_admin'
 
@@ -213,6 +214,16 @@ function NewUserForm() {
     }))
   }
 
+  const handleLeadTypeChange = (value: 'referral_partner' | 'potential_customer' | "") => {
+    setFormData(prev => ({
+      ...prev,
+      lead_type: value || null,
+      // Clear the appropriate company field when lead type changes
+      company_id: value === 'referral_partner' ? prev.company_id : null,
+      referral_company_id: value === 'potential_customer' ? prev.referral_company_id : null
+    }))
+  }
+
   if (!currentUserRole) {
     return (
       <div className="container mx-auto py-10">
@@ -344,9 +355,7 @@ function NewUserForm() {
                   <Label htmlFor="lead_type">Lead Type</Label>
                   <Select
                     value={formData.lead_type || ""}
-                    onValueChange={(value: 'referral_partner' | 'potential_customer' | "") => 
-                      setFormData(prev => ({ ...prev, lead_type: value || null }))
-                    }
+                    onValueChange={handleLeadTypeChange}
                   >
                     <SelectTrigger>
                       <SelectValue placeholder="Select lead type" />
@@ -363,7 +372,7 @@ function NewUserForm() {
                 <div>
                   <Label htmlFor="company">Company</Label>
                   <div className="mt-1">
-                    <CompanyCombobox
+                    <ReferralPartnerCompanyCombobox
                       companies={companies}
                       value={formData.company_id?.toString() || null}
                       onChange={handleCompanyChange}
@@ -377,7 +386,7 @@ function NewUserForm() {
                   <div>
                     <Label htmlFor="referral_company">Referral Company</Label>
                     <div className="mt-1">
-                      <CompanyCombobox
+                      <PotentialCustomerCompanyCombobox
                         companies={companies}
                         value={formData.referral_company_id?.toString() || null}
                         onChange={handleReferralCompanyChange}

@@ -6,9 +6,17 @@ import type { CookieOptions } from '@supabase/ssr'
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 
+export async function POST(request: Request) {
+  return handleRequest(request)
+}
+
 export async function PUT(request: Request) {
+  return handleRequest(request)
+}
+
+async function handleRequest(request: Request) {
   try {
-    const { userId, updates } = await request.json()
+    const updates = await request.json()
     
     const cookieStore = await cookies()
     const supabase = createServerClient(
@@ -45,11 +53,18 @@ export async function PUT(request: Request) {
       return new NextResponse('Forbidden', { status: 403 })
     }
 
+    // Extract the user ID from the updates
+    const { id, ...updateData } = updates
+
+    if (!id) {
+      return new NextResponse('User ID is required', { status: 400 })
+    }
+
     // Update the user
     const { data: updatedUser, error } = await supabase
       .from('users')
-      .update(updates)
-      .eq('id', userId)
+      .update(updateData)
+      .eq('id', id)
       .select()
       .single()
 

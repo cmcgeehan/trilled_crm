@@ -17,51 +17,40 @@ export type Company = {
   [key: string]: string | null | undefined | Date
 }
 
-interface CompanyComboboxProps {
+interface BaseCompanyComboboxProps {
   companies: Company[]
   value?: string | null
   onChange: (value: string | null) => void
   disabled?: boolean
+  placeholder?: string
+  searchPlaceholder?: string
 }
 
-export function CompanyCombobox({
+export function BaseCompanyCombobox({
   companies,
   value,
   onChange,
   disabled = false,
-}: CompanyComboboxProps) {
+  placeholder = "Select company...",
+  searchPlaceholder = "Search companies..."
+}: BaseCompanyComboboxProps) {
   const [open, setOpen] = React.useState(false)
   const [searchQuery, setSearchQuery] = React.useState("")
-
-  // Debug: Log when companies prop changes
-  React.useEffect(() => {
-    console.log('CompanyCombobox:', {
-      disabled,
-      companiesLength: companies.length,
-      value,
-      open
-    });
-  }, [companies.length, disabled, value, open]);
 
   const filteredCompanies = React.useMemo(() => {
     if (!searchQuery) return companies;
     
     const lowerQuery = searchQuery.toLowerCase().trim();
-    console.log('Filtering with query:', lowerQuery);
     
-    const filtered = companies.filter((company) => {
+    return companies.filter((company) => {
       const companyName = company.name?.toLowerCase() || '';
       return companyName.includes(lowerQuery);
     });
-    
-    console.log('Filtered results:', filtered.length, 'companies');
-    return filtered;
   }, [companies, searchQuery])
 
   const selectedCompany = companies.find((company) => company.id === value)
 
-  const handleSelect = React.useCallback((companyId: string | null, companyName?: string) => {
-    console.log('Handling selection:', { companyId, companyName });
+  const handleSelect = React.useCallback((companyId: string | null) => {
     if (!disabled) {
       onChange(companyId);
       setOpen(false);
@@ -82,7 +71,7 @@ export function CompanyCombobox({
           )}
           disabled={disabled}
         >
-          {value ? (selectedCompany?.name || 'Unnamed Company') : "Select company..."}
+          {value ? (selectedCompany?.name || 'Unnamed Company') : placeholder}
           <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
         </Button>
       </PopoverTrigger>
@@ -90,7 +79,7 @@ export function CompanyCombobox({
         <div className="flex items-center border-b px-3">
           <input
             className="flex h-11 w-full rounded-md bg-transparent py-3 text-sm outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed disabled:opacity-50"
-            placeholder="Search companies..."
+            placeholder={searchPlaceholder}
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
           />
@@ -117,7 +106,7 @@ export function CompanyCombobox({
             <div
               key={company.id}
               role="button"
-              onClick={() => handleSelect(company.id, company.name || undefined)}
+              onClick={() => handleSelect(company.id)}
               className={cn(
                 "flex items-center rounded-sm px-2 py-1.5 text-sm",
                 !disabled && "cursor-pointer hover:bg-accent hover:text-accent-foreground",

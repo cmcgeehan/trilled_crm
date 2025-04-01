@@ -22,9 +22,10 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { supabase } from "@/lib/supabase" 
 import { Database } from "@/types/supabase"
 import { calculateFollowUpDates } from "@/lib/utils"
-import { CompanyCombobox } from "@/components/ui/company-combobox"
 import { OwnerCombobox } from "@/components/ui/owner-combobox"
 import { MessageInput } from "@/components/message-input"
+import { ReferralPartnerCompanyCombobox } from "@/components/ui/referral-partner-company-combobox"
+import { PotentialCustomerCompanyCombobox } from "@/components/ui/potential-customer-company-combobox"
 
 type UserRole = Database['public']['Tables']['users']['Row']['role']
 type FollowUpType = 'email' | 'sms' | 'call' | 'meeting' | 'tour'
@@ -69,6 +70,21 @@ type Interaction = {
   duration?: string
   recordingUrl?: string
   agentName?: string
+}
+
+type FormData = {
+  first_name: string;
+  last_name: string;
+  email: string;
+  phone: string;
+  position: string;
+  role: UserRole;
+  status: UserStatus;
+  owner_id: string | null;
+  notes: string;
+  lead_type: 'referral_partner' | 'potential_customer' | null;
+  company_id: string | null;
+  referral_company_id: string | null;
 }
 
 const lostReasons = [
@@ -126,7 +142,7 @@ export default function CustomerDetailPage({ params }: { params: Promise<{ id: s
   const scrollContainerRef = useRef<HTMLDivElement>(null)
   const [companies, setCompanies] = useState<Database['public']['Tables']['companies']['Row'][]>([])
   const [currentUser, setCurrentUser] = useState<Database['public']['Tables']['users']['Row'] | null>(null)
-  const [formData, setFormData] = useState({
+  const [formData, setFormData] = useState<FormData>({
     first_name: customer?.first_name || "",
     last_name: customer?.last_name || "",
     email: customer?.email || "",
@@ -137,6 +153,8 @@ export default function CustomerDetailPage({ params }: { params: Promise<{ id: s
     owner_id: customer?.owner_id || null,
     notes: customer?.notes || "",
     lead_type: customer?.lead_type || null,
+    company_id: customer?.company_id || null,
+    referral_company_id: customer?.referral_company_id || null,
   })
 
   // Add this useEffect to update form data when customer changes
@@ -153,6 +171,8 @@ export default function CustomerDetailPage({ params }: { params: Promise<{ id: s
         owner_id: customer.owner_id || null,
         notes: customer.notes || "",
         lead_type: customer.lead_type || null,
+        company_id: customer.company_id || null,
+        referral_company_id: customer.referral_company_id || null,
       })
     }
   }, [customer])
@@ -685,11 +705,13 @@ export default function CustomerDetailPage({ params }: { params: Promise<{ id: s
           email: editedCustomer.email,
           phone: editedCustomer.phone,
           position: editedCustomer.position,
-          company_id: editedCustomer.company_id,
+          company_id: formData.company_id,
+          referral_company_id: formData.referral_company_id,
           notes: editedCustomer.notes,
           status: editedCustomer.status,
           owner_id: editedCustomer.owner_id,
           role: editedCustomer.role,
+          lead_type: formData.lead_type,
         })
       })
 
@@ -703,7 +725,8 @@ export default function CustomerDetailPage({ params }: { params: Promise<{ id: s
         .from('users')
         .select(`
           *,
-          companies (
+          companies!company_id (
+            id,
             name
           )
         `)
@@ -1383,20 +1406,38 @@ export default function CustomerDetailPage({ params }: { params: Promise<{ id: s
                 <div>
                   <h3 className="text-lg font-semibold mb-4">Company Information</h3>
                   <div className="space-y-4">
-                    <div>
-                      <Label htmlFor="company">Company</Label>
-                      <div className="mt-1">
-                        <CompanyCombobox
-                          companies={companies}
-                          value={customer?.company_id}
-                          onChange={(value) => {
-                            console.log('CompanyCombobox onChange:', value);
-                            setEditedCustomer(prev => ({ ...prev!, company_id: value }));
-                          }}
-                          disabled={!isEditable}
-                        />
+                    {formData.lead_type === 'referral_partner' && (
+                      <div>
+                        <Label htmlFor="company">Company</Label>
+                        <div className="mt-1">
+                          <ReferralPartnerCompanyCombobox
+                            companies={companies}
+                            value={formData.company_id}
+                            onChange={(value) => {
+                              console.log('CompanyCombobox onChange:', value);
+                              setFormData(prev => ({ ...prev, company_id: value }));
+                            }}
+                            disabled={!isEditable}
+                          />
+                        </div>
                       </div>
-                    </div>
+                    )}
+                    {formData.lead_type === 'potential_customer' && (
+                      <div>
+                        <Label htmlFor="referral_company">Referral Company</Label>
+                        <div className="mt-1">
+                          <PotentialCustomerCompanyCombobox
+                            companies={companies}
+                            value={formData.referral_company_id}
+                            onChange={(value) => {
+                              console.log('ReferralCompanyCombobox onChange:', value);
+                              setFormData(prev => ({ ...prev, referral_company_id: value }));
+                            }}
+                            disabled={!isEditable}
+                          />
+                        </div>
+                      </div>
+                    )}
                     <div>
                       <Label htmlFor="position">Position</Label>
                       <Input
@@ -1529,6 +1570,8 @@ export default function CustomerDetailPage({ params }: { params: Promise<{ id: s
                     owner_id: customer?.owner_id || null,
                     notes: customer?.notes || "",
                     lead_type: customer?.lead_type || null,
+                    company_id: customer?.company_id || null,
+                    referral_company_id: customer?.referral_company_id || null,
                   })}>
                     Reset Changes
                   </Button>
