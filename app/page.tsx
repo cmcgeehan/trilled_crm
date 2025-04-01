@@ -6,22 +6,28 @@ import { Card, CardContent } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { supabase } from "@/lib/supabase"
 import { useRouter } from "next/navigation"
-import { Database } from "@/types/supabase"
 import { cn } from "@/lib/utils"
-import { Badge } from "@/components/ui/badge"
 
 type UserStatus = 'needs_response' | 'new' | 'follow_up' | 'won' | 'lost'
 type UserRole = 'lead' | 'customer' | 'agent' | 'admin' | 'super_admin'
 
-type User = Omit<Database['public']['Tables']['users']['Row'], 'status' | 'role'> & {
-  status: UserStatus
+type User = {
+  id: string
+  email: string
+  first_name: string
+  last_name: string
   role: UserRole
-  position?: string | null
+  status: UserStatus
+  lead_type?: 'Referral Partner' | 'Potential Customer'
+  company_id?: string
+  referral_company_id?: string
+  owner_id?: string
+  created_at: string
+  updated_at: string
   companies?: {
     id: string
     name: string
-  } | null
-  lead_type?: 'B2B' | 'B2C' | null
+  }
 }
 
 const ACTIVE_STATUSES = ['needs_response', 'new', 'follow_up'] as const
@@ -47,10 +53,16 @@ const ROLE_BADGE_STYLES: Record<'lead' | 'customer', { bg: string, text: string 
   'customer': { bg: 'bg-green-100', text: 'text-green-800' },
 }
 
-const LEAD_TYPE_BADGE_STYLES: Record<'B2B' | 'B2C', { bg: string, text: string }> = {
-  'B2B': { bg: 'bg-blue-100', text: 'text-blue-800' },
-  'B2C': { bg: 'bg-orange-100', text: 'text-orange-800' },
-}
+const LEAD_TYPE_BADGE_STYLES = {
+  'Referral Partner': {
+    bg: 'bg-brand-darkBlue',
+    text: 'text-brand-white'
+  },
+  'Potential Customer': {
+    bg: 'bg-brand-lightBlue',
+    text: 'text-brand-darkBlue'
+  }
+} as const
 
 export default function DashboardPage() {
   const router = useRouter()
@@ -157,11 +169,13 @@ export default function DashboardPage() {
     const { data: { session } } = await supabase.auth.getSession()
     if (!session) return
 
+    console.log('Fetching users for session:', session.user.id)
+
     const { data, error } = await supabase
       .from('users')
       .select(`
         *,
-        companies (
+        companies!users_company_id_fkey (
           id,
           name
         )
@@ -177,6 +191,8 @@ export default function DashboardPage() {
       console.error('Error fetching users:', error)
       return
     }
+
+    console.log('Raw user data:', data)
 
     // Sort users by lead type (B2C first), role (leads first), and status priority
     const sortedUsers = [...(data || [])].map(user => ({
@@ -200,6 +216,7 @@ export default function DashboardPage() {
       return STATUS_PRIORITY[statusA] - STATUS_PRIORITY[statusB]
     })
 
+    console.log('Sorted users:', sortedUsers)
     setUsers(sortedUsers)
   }
 
@@ -277,33 +294,29 @@ export default function DashboardPage() {
                     <div 
                       className={cn(
                         "rounded-full px-2 py-0.5 text-xs font-medium",
-                        ROLE_BADGE_STYLES[user.role as 'lead' | 'customer'].bg,
-                        ROLE_BADGE_STYLES[user.role as 'lead' | 'customer'].text
+                        ROLE_BADGE_STYLES[user.role as 'lead' | 'customer']?.bg || 'bg-gray-100',
+                        ROLE_BADGE_STYLES[user.role as 'lead' | 'customer']?.text || 'text-gray-800'
                       )}
                     >
                       {user.role.charAt(0).toUpperCase() + user.role.slice(1)}
                     </div>
                     {user.role === 'lead' && user.lead_type && (
-                      <Badge 
-                        className={`${LEAD_TYPE_BADGE_STYLES[user.lead_type as 'B2B' | 'B2C'].bg} ${LEAD_TYPE_BADGE_STYLES[user.lead_type as 'B2B' | 'B2C'].text}`}
+                      <div 
+                        className={cn(
+                          "rounded-full px-2 py-0.5 text-xs font-medium",
+                          user.lead_type && LEAD_TYPE_BADGE_STYLES[user.lead_type as keyof typeof LEAD_TYPE_BADGE_STYLES]?.bg || 'bg-gray-100',
+                          user.lead_type && LEAD_TYPE_BADGE_STYLES[user.lead_type as keyof typeof LEAD_TYPE_BADGE_STYLES]?.text || 'text-gray-800'
+                        )}
                       >
-                        {user.lead_type}
-                      </Badge>
+                        {user.lead_type || 'Unknown Type'}
+                      </div>
                     )}
                   </div>
                   <p className="text-sm text-brand-darkBlue/70">
                     {user.companies?.name ? (
                       <>
                         {user.companies.name}
-                        {user.position && (
-                          <>
-                            <span className="mx-1">·</span>
-                            <span>{user.position}</span>
-                          </>
-                        )}
                       </>
-                    ) : user.position ? (
-                      <span>{user.position}</span>
                     ) : null}
                   </p>
                 </div>
@@ -311,13 +324,13 @@ export default function DashboardPage() {
                   <div 
                     className={cn(
                       "rounded-full px-3 py-1 text-sm font-medium",
-                      STATUS_STYLES[user.status].bg,
-                      STATUS_STYLES[user.status].text
+                      user.status && STATUS_STYLES[user.status as UserStatus]?.bg || 'bg-gray-100',
+                      user.status && STATUS_STYLES[user.status as UserStatus]?.text || 'text-gray-800'
                     )}
                   >
-                    {user.status.split('_').map(word => 
+                    {user.status ? user.status.split('_').map(word => 
                       word.charAt(0).toUpperCase() + word.slice(1)
-                    ).join(' ')}
+                    ).join(' ') : 'Unknown Status'}
                   </div>
                   <Button 
                     asChild 
