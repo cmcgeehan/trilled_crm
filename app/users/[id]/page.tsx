@@ -207,16 +207,16 @@ export default function CustomerDetailPage({ params }: { params: Promise<{ id: s
       
       while (hasMore) {
         // Build query with pagination
-        let query = supabase
+        const query = supabase
           .from('companies')
           .select('*')
           .is('deleted_at', null)
           .order('id', { ascending: true })
           .limit(1000);
-        
+
         // Add starting point for pagination if we have a last ID
         if (lastId) {
-          query = query.gt('id', lastId);
+          query.gt('id', lastId);
         }
         
         const { data: companies, error: companiesError } = await query;
@@ -251,7 +251,7 @@ export default function CustomerDetailPage({ params }: { params: Promise<{ id: s
     } catch (err) {
       console.error('Error in loadCompanies:', err);
     }
-  }, []);
+  }, [])
 
   const loadFollowUps = useCallback(async () => {
     if (!id) return
@@ -318,7 +318,21 @@ export default function CustomerDetailPage({ params }: { params: Promise<{ id: s
   const loadCustomer = useCallback(async () => {
     try {
       setLoading(true)
-      const { data, error: fetchError } = await supabase
+      
+      // First get the current user's organization ID
+      const { data: { session } } = await supabase.auth.getSession()
+      if (!session) throw new Error('Not authenticated')
+
+      const { data: currentUserData } = await supabase
+        .from('users')
+        .select('organization_id, role')
+        .eq('id', session.user.id)
+        .single()
+
+      if (!currentUserData) throw new Error('Current user not found')
+
+      // First try to get the user without organization filter
+      const query = supabase
         .from('users')
         .select(`
           *,
@@ -328,12 +342,20 @@ export default function CustomerDetailPage({ params }: { params: Promise<{ id: s
           )
         `)
         .eq('id', id)
-        .single()
+
+      const { data, error: fetchError } = await query.single()
 
       if (fetchError) throw fetchError
 
       if (!data) {
         throw new Error('Customer not found')
+      }
+
+      // Check if user has access to this customer based on organization
+      if (currentUserData.role !== 'super_admin' && 
+          currentUserData.organization_id && 
+          data.organization_id !== currentUserData.organization_id) {
+        throw new Error('You do not have access to this customer')
       }
 
       const customer = {

@@ -57,24 +57,22 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    // Get current user's role and organization using the admin client
-    const { data: currentUser, error: userError } = await supabaseAdmin
+    // Get current user's role and organization
+    const { data: currentUser } = await supabase
       .from('users')
       .select('role, organization_id')
       .eq('id', session.user.id)
       .single()
 
-    if (userError) {
-      console.error('API: Error fetching current user:', userError)
-      return NextResponse.json({ error: `Error fetching current user: ${userError.message}` }, { status: 500 })
+    if (!currentUser) {
+      console.log('API: User not found')
+      return NextResponse.json({ error: 'User not found' }, { status: 404 })
     }
 
-    console.log('API: Current user:', currentUser)
-
-    // Check basic role permissions
-    if (!currentUser || !['admin', 'super_admin', 'agent'].includes(currentUser.role)) {
+    // Check if user has permission to create users
+    if (!['admin', 'super_admin', 'agent'].includes(currentUser.role)) {
       console.log('API: User not authorized:', currentUser?.role)
-      return NextResponse.json({ error: 'Forbidden - Insufficient permissions' }, { status: 403 })
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 403 })
     }
 
     // Check role hierarchy permissions
@@ -117,7 +115,7 @@ export async function POST(request: Request) {
       position: userData.position,
       role: userData.role,
       status: userData.status,
-      company_id: userData.company_id,
+      company_id: userData.company_id || null,
       owner_id: userData.owner_id || (currentUser.role === 'agent' ? session.user.id : null),
       organization_id: userData.organization_id,
       notes: userData.notes,
@@ -127,20 +125,52 @@ export async function POST(request: Request) {
 
     console.log('API: Attempting to create user with data:', insertData)
 
-    // Start a transaction to create both user and follow-ups
-    const { data: newUser, error: insertError } = await supabaseAdmin
+    // Check if user already exists
+    const { data: existingUser } = await supabase
       .from('users')
-      .insert(insertData)
+      .select('id')
+      .eq('email', userData.email)
+      .single()
+
+    if (existingUser) {
+      return NextResponse.json({ error: 'User already exists' }, { status: 400 })
+    }
+
+    let userId = userData.id
+
+    // Only create auth user for roles that need authentication
+    if (['agent', 'admin', 'super_admin'].includes(userData.role)) {
+      // Create auth user
+      const { data: authData, error: authError } = await supabase.auth.admin.createUser({
+        email: userData.email,
+        password: userData.password,
+        email_confirm: true,
+      })
+
+      if (authError) {
+        console.error('API: Error creating auth user:', authError)
+        return NextResponse.json({ error: authError.message }, { status: 400 })
+      }
+
+      userId = authData.user.id
+    }
+
+    // Insert user into database
+    const { error: insertError } = await supabase
+      .from('users')
+      .insert({
+        ...insertData,
+        id: userId
+      })
       .select()
       .single()
 
     if (insertError) {
-      console.error('API: Supabase error creating user:', {
-        error: insertError,
-        code: insertError.code,
-        details: insertError.details,
-        hint: insertError.hint
-      })
+      console.error('API: Error inserting user:', insertError)
+      // If insert fails and we created an auth user, delete it
+      if (['agent', 'admin', 'super_admin'].includes(userData.role)) {
+        await supabase.auth.admin.deleteUser(userId)
+      }
       return NextResponse.json({ error: insertError.message }, { status: 500 })
     }
 
@@ -150,7 +180,7 @@ export async function POST(request: Request) {
       const followUpsToCreate = followUpDates.map(date => ({
         due_date: date.toISOString(),
         type: 'email',
-        user_id: newUser.id,
+        user_id: userId,
         completed_at: null,
         next_follow_up_id: null
       }))
@@ -175,8 +205,8 @@ export async function POST(request: Request) {
       }
     }
 
-    console.log('API: Successfully created user:', newUser)
-    return NextResponse.json(newUser)
+    console.log('API: Successfully created user:', insertData)
+    return NextResponse.json(insertData)
   } catch (error) {
     console.error('API: Error in create route:', error)
     return NextResponse.json({ error: error instanceof Error ? error.message : 'Unknown error' }, { status: 500 })

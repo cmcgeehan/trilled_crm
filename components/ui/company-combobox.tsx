@@ -24,6 +24,8 @@ interface BaseCompanyComboboxProps {
   disabled?: boolean
   placeholder?: string
   searchPlaceholder?: string
+  loading?: boolean
+  error?: string | null
 }
 
 export function BaseCompanyCombobox({
@@ -32,7 +34,9 @@ export function BaseCompanyCombobox({
   onChange,
   disabled = false,
   placeholder = "Select company...",
-  searchPlaceholder = "Search companies..."
+  searchPlaceholder = "Search companies...",
+  loading = false,
+  error = null
 }: BaseCompanyComboboxProps) {
   const [open, setOpen] = React.useState(false)
   const [searchQuery, setSearchQuery] = React.useState("")
@@ -58,6 +62,12 @@ export function BaseCompanyCombobox({
     }
   }, [disabled, onChange]);
 
+  const getCompanyDisplayName = (company: Company | undefined) => {
+    if (!company) return placeholder;
+    if (!company.name) return `Company ${company.id.slice(0, 8)}`;
+    return company.name;
+  };
+
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
@@ -67,11 +77,18 @@ export function BaseCompanyCombobox({
           aria-expanded={open}
           className={cn(
             "w-full justify-between",
-            disabled ? "cursor-not-allowed" : "cursor-pointer"
+            disabled ? "cursor-not-allowed" : "cursor-pointer",
+            error && "border-red-500"
           )}
-          disabled={disabled}
+          disabled={disabled || loading}
         >
-          {value ? (selectedCompany?.name || 'Unnamed Company') : placeholder}
+          {loading ? (
+            <span className="text-muted-foreground">Loading companies...</span>
+          ) : error ? (
+            <span className="text-red-500">{error}</span>
+          ) : (
+            getCompanyDisplayName(selectedCompany)
+          )}
           <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
         </Button>
       </PopoverTrigger>
@@ -82,48 +99,61 @@ export function BaseCompanyCombobox({
             placeholder={searchPlaceholder}
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
+            disabled={loading}
           />
         </div>
         <div className="max-h-[300px] overflow-y-auto p-1">
-          <div
-            role="button"
-            onClick={() => handleSelect(null)}
-            className={cn(
-              "flex items-center rounded-sm px-2 py-1.5 text-sm",
-              !disabled && "cursor-pointer hover:bg-accent hover:text-accent-foreground",
-              disabled && "opacity-50 cursor-not-allowed"
-            )}
-          >
-            <Check
-              className={cn(
-                "mr-2 h-4 w-4",
-                !value ? "opacity-100" : "opacity-0"
-              )}
-            />
-            No Company
-          </div>
-          {filteredCompanies.map((company) => (
-            <div
-              key={company.id}
-              role="button"
-              onClick={() => handleSelect(company.id)}
-              className={cn(
-                "flex items-center rounded-sm px-2 py-1.5 text-sm",
-                !disabled && "cursor-pointer hover:bg-accent hover:text-accent-foreground",
-                disabled && "opacity-50 cursor-not-allowed"
-              )}
-            >
-              <Check
-                className={cn(
-                  "mr-2 h-4 w-4",
-                  value === company.id ? "opacity-100" : "opacity-0"
-                )}
-              />
-              {company.name || 'Unnamed Company'}
+          {loading ? (
+            <div className="py-6 text-center text-sm text-muted-foreground">
+              Loading companies...
             </div>
-          ))}
-          {filteredCompanies.length === 0 && (
-            <div className="py-6 text-center text-sm">No companies found.</div>
+          ) : error ? (
+            <div className="py-6 text-center text-sm text-red-500">
+              {error}
+            </div>
+          ) : (
+            <>
+              <div
+                role="button"
+                onClick={() => handleSelect(null)}
+                className={cn(
+                  "flex items-center rounded-sm px-2 py-1.5 text-sm",
+                  !disabled && "cursor-pointer hover:bg-accent hover:text-accent-foreground",
+                  disabled && "opacity-50 cursor-not-allowed"
+                )}
+              >
+                <Check
+                  className={cn(
+                    "mr-2 h-4 w-4",
+                    !value ? "opacity-100" : "opacity-0"
+                  )}
+                />
+                No Company
+              </div>
+              {filteredCompanies.map((company) => (
+                <div
+                  key={company.id}
+                  role="button"
+                  onClick={() => handleSelect(company.id)}
+                  className={cn(
+                    "flex items-center rounded-sm px-2 py-1.5 text-sm",
+                    !disabled && "cursor-pointer hover:bg-accent hover:text-accent-foreground",
+                    disabled && "opacity-50 cursor-not-allowed"
+                  )}
+                >
+                  <Check
+                    className={cn(
+                      "mr-2 h-4 w-4",
+                      value === company.id ? "opacity-100" : "opacity-0"
+                    )}
+                  />
+                  {getCompanyDisplayName(company)}
+                </div>
+              ))}
+              {filteredCompanies.length === 0 && (
+                <div className="py-6 text-center text-sm">No companies found.</div>
+              )}
+            </>
           )}
         </div>
       </PopoverContent>

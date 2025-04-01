@@ -8,7 +8,6 @@ import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { supabase } from "@/lib/supabase"
-import { Database } from "@/types/supabase"
 import { OwnerCombobox } from "@/components/ui/owner-combobox"
 import { ReferralPartnerCompanyCombobox } from "@/components/ui/referral-partner-company-combobox"
 import { PotentialCustomerCompanyCombobox } from "@/components/ui/potential-customer-company-combobox"
@@ -27,9 +26,11 @@ type FormData = {
   notes: string;
   lead_type: 'referral_partner' | 'potential_customer' | null;
   linkedin: string;
-  company_id: number | null;
-  referral_company_id: number | null;
+  company_id: string | null;
+  referral_company_id: string | null;
   lead_source: 'google_ads' | 'organic' | 'referral' | 'other' | null;
+  organization_id: string | null;
+  password: string;
 }
 
 const initialFormData: FormData = {
@@ -47,6 +48,8 @@ const initialFormData: FormData = {
   company_id: null,
   referral_company_id: null,
   lead_source: null,
+  organization_id: null,
+  password: "",
 }
 
 function NewUserForm() {
@@ -55,67 +58,69 @@ function NewUserForm() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [agents, setAgents] = useState<{ id: string, email: string | null, first_name: string | null, role: UserRole }[]>([])
-  const [companies, setCompanies] = useState<Database['public']['Tables']['companies']['Row'][]>([])
+  const [companies, setCompanies] = useState<{ id: string, name: string | null }[]>([])
   const [currentUserRole, setCurrentUserRole] = useState<string | null>(null)
+  const [currentOrganizationId, setCurrentOrganizationId] = useState<string | null>(null)
   const [formData, setFormData] = useState<FormData>(initialFormData)
 
   const loadCompanies = useCallback(async () => {
     try {
       console.log('Loading companies...')
-      const companyId = searchParams?.get('company')
-      console.log('Company ID from URL:', companyId)
 
-      // Load all companies first
-      const { data: allCompanies, error } = await supabase
+      // Load only the columns we need for the combobox
+      let query = supabase
         .from('companies')
-        .select('*')
+        .select('id, name')
         .is('deleted_at', null)
         .order('name')
-        .limit(1000)
+        .limit(50) // Reduce limit to prevent timeouts
 
-      if (error) throw error
+      // If user is not a super_admin, filter by organization_id
+      if (currentUserRole !== 'super_admin' && currentOrganizationId) {
+        query = query.eq('organization_id', currentOrganizationId)
+      }
 
-      // If we have a specific company ID, ensure it's in the list and at the top
+      const { data: companies, error } = await query
+
+      if (error) {
+        console.error('Error loading companies:', error)
+        return
+      }
+
+      // If we have a specific company ID from URL, ensure it's in the list
+      const companyId = searchParams?.get('company')
       if (companyId) {
-        // Find the specific company in the loaded companies
-        const specificCompany = allCompanies?.find(company => company.id === parseInt(companyId))
+        // First check if the company is in our loaded list
+        const specificCompany = companies?.find(company => company.id.toString() === companyId)
         
-        if (specificCompany) {
-          // Filter out the specific company from the rest of the list
-          const otherCompanies = allCompanies?.filter(company => company.id !== parseInt(companyId)) || []
-          // Set the companies with the specific company first
-          setCompanies([specificCompany, ...otherCompanies])
-        } else {
-          // If the specific company wasn't in the first 1000, load it separately
+        if (!specificCompany) {
+          // If not in the list, load it separately
           const { data: companyData, error: companyError } = await supabase
             .from('companies')
-            .select('*')
+            .select('id, name')
             .eq('id', companyId)
             .single()
 
           if (companyError) {
             console.error('Error loading specific company:', companyError)
           } else if (companyData) {
-            console.log('Loaded specific company:', companyData)
-            // Set the companies with the specific company first
-            setCompanies([companyData, ...(allCompanies || [])])
+            // Add the specific company to the list
+            companies?.unshift(companyData)
           }
         }
 
         // Set the company ID in form data
-        console.log('Setting company ID in form:', companyId)
         setFormData(prev => ({
           ...prev,
-          company_id: companyId ? parseInt(companyId) : null
+          company_id: companyId
         }))
-      } else {
-        // If no specific company, just set all companies
-        setCompanies(allCompanies || [])
       }
+
+      setCompanies(companies || [])
     } catch (err) {
-      console.error('Error loading companies:', err)
+      console.error('Error in loadCompanies:', err)
     }
-  }, [searchParams])
+  }, [searchParams, currentUserRole, currentOrganizationId])
 
   useEffect(() => {
     const checkSession = async () => {
@@ -136,6 +141,7 @@ function NewUserForm() {
         
         if (userData) {
           setCurrentUserRole(userData.role)
+          setCurrentOrganizationId(userData.organization_id)
         }
       } catch (error) {
         console.error('Error checking session:', error)
@@ -178,12 +184,47 @@ function NewUserForm() {
     setError(null)
 
     try {
+      // Get current user's organization ID
+      const { data: { session } } = await supabase.auth.getSession()
+      if (!session?.user?.id) {
+        throw new Error('No authenticated user found')
+      }
+
+      const { data: currentUser } = await supabase
+        .from('users')
+        .select('organization_id')
+        .eq('id', session.user.id)
+        .single()
+
+      if (!currentUser?.organization_id) {
+        throw new Error('No organization found for current user')
+      }
+
+      // Validate required fields based on role
+      if (['agent', 'admin', 'super_admin'].includes(formData.role)) {
+        // For authenticated users, email and password are required
+        if (!formData.email || !formData.password || !formData.first_name || !formData.last_name) {
+          throw new Error('Please fill in all required fields (first name, last name, email, password)')
+        }
+        if (formData.password.length < 6) {
+          throw new Error('Password must be at least 6 characters long')
+        }
+      } else {
+        // For leads and customers, only first name and last name are required
+        if (!formData.first_name || !formData.last_name) {
+          throw new Error('Please fill in first name and last name')
+        }
+      }
+
       const response = await fetch('/api/users/create', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify(formData),
+        body: JSON.stringify({
+          ...formData,
+          organization_id: currentUser.organization_id
+        }),
       })
 
       if (!response.ok) {
@@ -192,7 +233,14 @@ function NewUserForm() {
       }
 
       const data = await response.json()
-      router.push(`/users/${data.id}`)
+      console.log('Created user:', data) // Add logging to debug
+
+      if (!data.id) {
+        throw new Error('No user ID returned from server')
+      }
+
+      // Use replace instead of push to prevent back button from returning to form
+      router.replace(`/users/${data.id}`)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'An error occurred')
     } finally {
@@ -201,16 +249,17 @@ function NewUserForm() {
   }
 
   const handleCompanyChange = (value: string | null) => {
+    console.log('Company change:', value)
     setFormData(prev => ({
       ...prev,
-      company_id: value ? parseInt(value) : null
+      company_id: value
     }))
   }
 
   const handleReferralCompanyChange = (value: string | null) => {
     setFormData(prev => ({
       ...prev,
-      referral_company_id: value ? parseInt(value) : null
+      referral_company_id: value
     }))
   }
 
@@ -374,7 +423,7 @@ function NewUserForm() {
                   <div className="mt-1">
                     <ReferralPartnerCompanyCombobox
                       companies={companies}
-                      value={formData.company_id?.toString() || null}
+                      value={formData.company_id || null}
                       onChange={handleCompanyChange}
                     />
                   </div>
@@ -388,7 +437,7 @@ function NewUserForm() {
                     <div className="mt-1">
                       <PotentialCustomerCompanyCombobox
                         companies={companies}
-                        value={formData.referral_company_id?.toString() || null}
+                        value={formData.referral_company_id || null}
                         onChange={handleReferralCompanyChange}
                       />
                     </div>

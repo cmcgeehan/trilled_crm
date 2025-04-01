@@ -73,8 +73,19 @@ CREATE POLICY "users_insert" ON users
             WHERE r.id = auth.uid()
             AND r.deleted_at IS NULL
             AND r.role = 'admin'
-            AND r.organization_id = organization_id
+            AND r.organization_id = users.organization_id
             AND r.organization_id IS NOT NULL
+        )
+        OR
+        -- Allow agents to create leads and customers in their org
+        EXISTS (
+            SELECT 1 FROM user_roles r
+            WHERE r.id = auth.uid()
+            AND r.deleted_at IS NULL
+            AND r.role = 'agent'
+            AND r.organization_id = users.organization_id
+            AND r.organization_id IS NOT NULL
+            AND users.role IN ('lead', 'customer')
         )
     );
 
