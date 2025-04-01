@@ -40,7 +40,7 @@ async function handleRequest(request: Request) {
     // Verify user is authenticated and has appropriate role
     const { data: { session } } = await supabase.auth.getSession()
     if (!session) {
-      return new NextResponse('Unauthorized', { status: 401 })
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
     const { data: currentUser } = await supabase
@@ -50,14 +50,14 @@ async function handleRequest(request: Request) {
       .single()
 
     if (!currentUser || !['admin', 'super_admin'].includes(currentUser.role)) {
-      return new NextResponse('Forbidden', { status: 403 })
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
     }
 
     // Extract the user ID from the updates
     const { id, ...updateData } = updates
 
     if (!id) {
-      return new NextResponse('User ID is required', { status: 400 })
+      return NextResponse.json({ error: 'User ID is required' }, { status: 400 })
     }
 
     // Update the user
@@ -70,12 +70,14 @@ async function handleRequest(request: Request) {
 
     if (error) {
       console.error('Error updating user:', error)
-      return new NextResponse('Internal Server Error', { status: 500 })
+      return NextResponse.json({ error: error.message }, { status: 500 })
     }
 
     return NextResponse.json(updatedUser)
   } catch (error) {
     console.error('Error in users update route:', error)
-    return new NextResponse('Internal Server Error', { status: 500 })
+    return NextResponse.json({ 
+      error: error instanceof Error ? error.message : 'Internal Server Error' 
+    }, { status: 500 })
   }
 } 

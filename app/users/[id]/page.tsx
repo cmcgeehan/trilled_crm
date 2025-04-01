@@ -25,7 +25,6 @@ import { calculateFollowUpDates } from "@/lib/utils"
 import { OwnerCombobox } from "@/components/ui/owner-combobox"
 import { MessageInput } from "@/components/message-input"
 import { ReferralPartnerCompanyCombobox } from "@/components/ui/referral-partner-company-combobox"
-import { PotentialCustomerCompanyCombobox } from "@/components/ui/potential-customer-company-combobox"
 import { VOBForm } from "@/components/vob-form"
 
 type UserRole = Database['public']['Tables']['users']['Row']['role']
@@ -38,6 +37,7 @@ type Customer = Database['public']['Tables']['users']['Row'] & {
   company_id: string | null;
   notes: string | null;
   linkedin: string | null;
+  referring_user_id: string | null;
   companies?: {
     id: string;
     name: string;
@@ -88,7 +88,18 @@ type FormData = {
   notes: string;
   lead_type: 'referral_partner' | 'potential_customer' | null;
   company_id: string | null;
-  referral_company_id: string | null;
+  referrer_id: string | null;
+  referring_user_id: string | null;
+}
+
+type B2CLeadInfo = {
+  address: string;
+  gender: 'Male' | 'Female' | 'Non-binary' | 'Other' | 'Prefer not to say';
+  ssn_last_four: string;
+  marital_status: 'Single' | 'Married' | 'Divorced' | 'Widowed';
+  parental_status: 'Has children' | 'No children';
+  referral_source: string;
+  headshot_url: string | null;
 }
 
 const lostReasons = [
@@ -158,8 +169,12 @@ export default function CustomerDetailPage({ params }: { params: Promise<{ id: s
     notes: customer?.notes || "",
     lead_type: customer?.lead_type || null,
     company_id: customer?.company_id || null,
-    referral_company_id: customer?.referral_company_id || null,
+    referrer_id: customer?.referring_user_id || null,
+    referring_user_id: customer?.referring_user_id || null,
   })
+  const [b2cLeadInfo, setB2cLeadInfo] = useState<B2CLeadInfo | null>(null)
+  const [isLoadingB2CInfo, setIsLoadingB2CInfo] = useState(false)
+  const [referringUsers, setReferringUsers] = useState<Database['public']['Tables']['users']['Row'][]>([])
 
   // Add this useEffect to update form data when customer changes
   useEffect(() => {
@@ -176,7 +191,8 @@ export default function CustomerDetailPage({ params }: { params: Promise<{ id: s
         notes: customer.notes || "",
         lead_type: customer.lead_type || null,
         company_id: customer.company_id || null,
-        referral_company_id: customer.referral_company_id || null,
+        referrer_id: customer.referring_user_id || null,
+        referring_user_id: customer.referring_user_id || null,
       })
     }
   }, [customer])
@@ -297,7 +313,7 @@ export default function CustomerDetailPage({ params }: { params: Promise<{ id: s
     } catch (err) {
       console.error('Error loading follow-ups:', err)
     }
-  }, [id, supabase])
+  }, [id])
 
   const loadCustomer = useCallback(async () => {
     try {
@@ -377,10 +393,42 @@ export default function CustomerDetailPage({ params }: { params: Promise<{ id: s
     }
   }, [id, loadFollowUps, currentUserRole, currentUser])
 
+  const loadReferringUsers = useCallback(async () => {
+    try {
+      const { data, error } = await supabase
+        .from('users')
+        .select('*')
+        .eq('lead_type', 'referral_partner')
+        .is('deleted_at', null)
+        .order('first_name', { ascending: true })
+
+      if (error) throw error
+      setReferringUsers(data || [])
+    } catch (err) {
+      console.error('Error loading referring users:', err)
+    }
+  }, [])
+
+  const loadAgents = useCallback(async () => {
+    try {
+      const { data, error } = await supabase
+        .from('users')
+        .select('id, email, first_name, role')
+        .in('role', ['agent', 'admin', 'super_admin'])
+        .is('deleted_at', null)
+      
+      if (error) throw error
+      setAgents(data || [])
+    } catch (err) {
+      console.error('Error loading agents:', err)
+    }
+  }, [])
+
   useEffect(() => {
     loadCustomer()
     loadAgents()
     loadCompanies()
+    loadReferringUsers()
 
     // Set up real-time subscription for communications with retry logic
     let retryCount = 0
@@ -457,7 +505,7 @@ export default function CustomerDetailPage({ params }: { params: Promise<{ id: s
       }
       channel.unsubscribe()
     }
-  }, [id, loadCustomer, loadCompanies]) // Keep loadCustomer and loadCompanies in dependencies
+  }, [id, loadCustomer, loadCompanies, loadReferringUsers, loadAgents])
 
   useEffect(() => {
     const checkSession = async () => {
@@ -496,21 +544,6 @@ export default function CustomerDetailPage({ params }: { params: Promise<{ id: s
     }
     checkSession()
   }, [router, customer])
-
-  const loadAgents = useCallback(async () => {
-    try {
-      const { data, error } = await supabase
-        .from('users')
-        .select('id, email, first_name, role')
-        .in('role', ['agent', 'admin', 'super_admin'])
-        .is('deleted_at', null)
-      
-      if (error) throw error
-      setAgents(data || [])
-    } catch (err) {
-      console.error('Error loading agents:', err)
-    }
-  }, [])
 
   useEffect(() => {
     const tab = searchParams?.get("tab") || ''
@@ -712,12 +745,12 @@ export default function CustomerDetailPage({ params }: { params: Promise<{ id: s
           phone: editedCustomer.phone,
           position: editedCustomer.position,
           company_id: formData.company_id,
-          referral_company_id: formData.referral_company_id,
+          referrer_id: formData.referrer_id,
           notes: editedCustomer.notes,
           status: editedCustomer.status,
           owner_id: editedCustomer.owner_id,
           role: editedCustomer.role,
-          lead_type: formData.lead_type,
+          lead_type: formData.lead_type
         })
       })
 
@@ -978,6 +1011,126 @@ export default function CustomerDetailPage({ params }: { params: Promise<{ id: s
 
     loadCurrentUser()
   }, [])
+
+  // Add this function to load B2C lead info
+  const loadB2CLeadInfo = async () => {
+    if (!customer || customer.lead_type !== 'potential_customer') return;
+    
+    setIsLoadingB2CInfo(true);
+    try {
+      // First try to get existing record
+      const { data: existingData, error: fetchError } = await supabase
+        .from('b2c_lead_info')
+        .select('*')
+        .eq('user_id', id)
+        .single();
+
+      if (fetchError && fetchError.code === 'PGRST116') {
+        // No record exists, create a new one
+        const { data: newData, error: insertError } = await supabase
+          .from('b2c_lead_info')
+          .insert({
+            user_id: id,
+            address: '',
+            gender: 'Prefer not to say',
+            ssn_last_four: '',
+            marital_status: 'Single',
+            parental_status: 'No children',
+            referral_source: '',
+            headshot_url: null
+          })
+          .select()
+          .single();
+
+        if (insertError) throw insertError;
+        setB2cLeadInfo(newData);
+      } else if (fetchError) {
+        throw fetchError;
+      } else {
+        setB2cLeadInfo(existingData);
+      }
+    } catch (err) {
+      console.error('Error loading B2C lead info:', err);
+    } finally {
+      setIsLoadingB2CInfo(false);
+    }
+  };
+
+  // Add this function to handle B2C lead info updates
+  const handleSaveB2CLeadInfo = async () => {
+    if (!b2cLeadInfo) return;
+
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) throw new Error('Not authenticated');
+
+      // First check if record exists
+      const { data: existingData, error: fetchError } = await supabase
+        .from('b2c_lead_info')
+        .select('*')
+        .eq('user_id', id)
+        .single();
+
+      const updateData = {
+        user_id: id,
+        address: b2cLeadInfo.address || '',
+        gender: b2cLeadInfo.gender || 'Prefer not to say',
+        ssn_last_four: b2cLeadInfo.ssn_last_four || '',
+        marital_status: b2cLeadInfo.marital_status || 'Single',
+        parental_status: b2cLeadInfo.parental_status || 'No children',
+        referral_source: b2cLeadInfo.referral_source || '',
+        headshot_url: b2cLeadInfo.headshot_url,
+        updated_by: session.user.id
+      };
+
+      let result;
+      if (fetchError && fetchError.code === 'PGRST116') {
+        // No record exists, create new one
+        result = await supabase
+          .from('b2c_lead_info')
+          .insert({
+            ...updateData,
+            created_by: session.user.id
+          })
+          .select()
+          .single();
+      } else if (fetchError) {
+        throw fetchError;
+      } else if (existingData) {
+        // Record exists, update it
+        result = await supabase
+          .from('b2c_lead_info')
+          .update(updateData)
+          .eq('user_id', id)
+          .select()
+          .single();
+      } else {
+        throw new Error('Failed to determine record existence');
+      }
+
+      if (result.error) {
+        console.error('Error saving B2C lead info:', result.error);
+        throw new Error(result.error.message);
+      }
+
+      // Refresh the B2C lead info
+      const { data, error: refreshError } = await supabase
+        .from('b2c_lead_info')
+        .select('*')
+        .eq('user_id', id)
+        .single();
+
+      if (refreshError) {
+        console.error('Error refreshing B2C lead info:', refreshError);
+        throw new Error(refreshError.message);
+      }
+
+      setB2cLeadInfo(data);
+    } catch (err) {
+      console.error('Error saving B2C lead info:', err);
+      setError(err instanceof Error ? err.message : 'Failed to save B2C lead information');
+    }
+  };
 
   if (loading) {
     return (
@@ -1376,17 +1529,29 @@ export default function CustomerDetailPage({ params }: { params: Promise<{ id: s
                     )}
                     {formData.lead_type === 'potential_customer' && (
                       <div>
-                        <Label htmlFor="referral_company">Referral Company</Label>
+                        <Label htmlFor="referring_user">Referring User</Label>
                         <div className="mt-1">
-                          <PotentialCustomerCompanyCombobox
-                            companies={companies}
-                            value={formData.referral_company_id}
-                            onChange={(value) => {
-                              console.log('ReferralCompanyCombobox onChange:', value);
-                              setFormData(prev => ({ ...prev, referral_company_id: value }));
+                          <Select
+                            value={formData.referring_user_id || ""}
+                            onValueChange={(value) => {
+                              setFormData(prev => ({ 
+                                ...prev, 
+                                referring_user_id: value,
+                                referrer_id: value
+                              }))
                             }}
-                            disabled={!isEditable}
-                          />
+                          >
+                            <SelectTrigger>
+                              <SelectValue placeholder="Select referring user" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {referringUsers.map((user) => (
+                                <SelectItem key={user.id} value={user.id}>
+                                  {[user.first_name, user.last_name].filter(Boolean).join(' ') || user.email}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
                         </div>
                       </div>
                     )}
@@ -1508,26 +1673,143 @@ export default function CustomerDetailPage({ params }: { params: Promise<{ id: s
                 </div>
               </div>
             </div>
+
+            {/* B2C Lead Information */}
+            {customer?.lead_type === 'potential_customer' && (
+              <div className="mt-8 border-t pt-8">
+                <h3 className="text-lg font-semibold mb-4">B2C Lead Information</h3>
+                {isLoadingB2CInfo ? (
+                  <p>Loading B2C lead information...</p>
+                ) : (
+                  <div className="grid grid-cols-2 gap-8">
+                    <div className="space-y-4">
+                      <div>
+                        <Label htmlFor="address">Address</Label>
+                        <Input
+                          id="address"
+                          value={b2cLeadInfo?.address || ''}
+                          onChange={(e) => setB2cLeadInfo(prev => ({ ...prev!, address: e.target.value }))}
+                          className="mt-1"
+                          disabled={!isEditable}
+                        />
+                      </div>
+                      <div>
+                        <Label htmlFor="gender">Gender</Label>
+                        <Select
+                          value={b2cLeadInfo?.gender || ''}
+                          onValueChange={(value: 'Male' | 'Female' | 'Non-binary' | 'Other' | 'Prefer not to say') => 
+                            setB2cLeadInfo(prev => ({ ...prev!, gender: value }))
+                          }
+                        >
+                          <SelectTrigger id="gender" className="mt-1">
+                            <SelectValue placeholder="Select gender" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="Male">Male</SelectItem>
+                            <SelectItem value="Female">Female</SelectItem>
+                            <SelectItem value="Non-binary">Non-binary</SelectItem>
+                            <SelectItem value="Other">Other</SelectItem>
+                            <SelectItem value="Prefer not to say">Prefer not to say</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div>
+                        <Label htmlFor="ssn_last_four">SSN Last 4</Label>
+                        <Input
+                          id="ssn_last_four"
+                          value={b2cLeadInfo?.ssn_last_four || ''}
+                          onChange={(e) => setB2cLeadInfo(prev => ({ ...prev!, ssn_last_four: e.target.value }))}
+                          className="mt-1"
+                          maxLength={4}
+                          disabled={!isEditable}
+                        />
+                      </div>
+                    </div>
+
+                    <div className="space-y-4">
+                      <div>
+                        <Label htmlFor="marital_status">Marital Status</Label>
+                        <Select
+                          value={b2cLeadInfo?.marital_status || ''}
+                          onValueChange={(value: 'Single' | 'Married' | 'Divorced' | 'Widowed') => 
+                            setB2cLeadInfo(prev => ({ ...prev!, marital_status: value }))
+                          }
+                        >
+                          <SelectTrigger id="marital_status" className="mt-1">
+                            <SelectValue placeholder="Select marital status" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="Single">Single</SelectItem>
+                            <SelectItem value="Married">Married</SelectItem>
+                            <SelectItem value="Divorced">Divorced</SelectItem>
+                            <SelectItem value="Widowed">Widowed</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div>
+                        <Label htmlFor="parental_status">Parental Status</Label>
+                        <Select
+                          value={b2cLeadInfo?.parental_status || ''}
+                          onValueChange={(value: 'Has children' | 'No children') => 
+                            setB2cLeadInfo(prev => ({ ...prev!, parental_status: value }))
+                          }
+                        >
+                          <SelectTrigger id="parental_status" className="mt-1">
+                            <SelectValue placeholder="Select parental status" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="Has children">Has children</SelectItem>
+                            <SelectItem value="No children">No children</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div>
+                        <Label htmlFor="referral_source">Referral Source</Label>
+                        <Input
+                          id="referral_source"
+                          value={b2cLeadInfo?.referral_source || ''}
+                          onChange={(e) => setB2cLeadInfo(prev => ({ ...prev!, referral_source: e.target.value }))}
+                          className="mt-1"
+                          disabled={!isEditable}
+                        />
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
             <div className="flex justify-end space-x-2 mt-4">
               {isEditable && (
                 <>
-                  <Button variant="outline" onClick={() => setFormData({
-                    first_name: customer?.first_name || "",
-                    last_name: customer?.last_name || "",
-                    email: customer?.email || "",
-                    phone: customer?.phone || "",
-                    position: customer?.position || "",
-                    role: customer?.role || "lead",
-                    status: customer?.status || "new",
-                    owner_id: customer?.owner_id || null,
-                    notes: customer?.notes || "",
-                    lead_type: customer?.lead_type || null,
-                    company_id: customer?.company_id || null,
-                    referral_company_id: customer?.referral_company_id || null,
-                  })}>
+                  <Button variant="outline" onClick={() => {
+                    setFormData({
+                      first_name: customer?.first_name || "",
+                      last_name: customer?.last_name || "",
+                      email: customer?.email || "",
+                      phone: customer?.phone || "",
+                      position: customer?.position || "",
+                      role: customer?.role || "lead",
+                      status: customer?.status || "new",
+                      owner_id: customer?.owner_id || null,
+                      notes: customer?.notes || "",
+                      lead_type: customer?.lead_type || null,
+                      company_id: customer?.company_id || null,
+                      referrer_id: customer?.referring_user_id || null,
+                      referring_user_id: customer?.referring_user_id || null,
+                    });
+                    if (customer?.lead_type === 'potential_customer') {
+                      loadB2CLeadInfo();
+                    }
+                  }}>
                     Reset Changes
                   </Button>
-                  <Button onClick={handleSaveCustomer} disabled={loading}>
+                  <Button onClick={() => {
+                    handleSaveCustomer();
+                    if (customer?.lead_type === 'potential_customer') {
+                      handleSaveB2CLeadInfo();
+                    }
+                  }} disabled={loading}>
                     {loading ? 'Saving...' : 'Save Changes'}
                   </Button>
                 </>

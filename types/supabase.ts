@@ -525,6 +525,61 @@ export interface Database {
           created_at?: string
         }
       }
+      b2c_lead_info: {
+        Row: {
+          id: string
+          user_id: string
+          address: string
+          gender: 'Male' | 'Female' | 'Non-binary' | 'Other' | 'Prefer not to say'
+          ssn_last_four: string
+          marital_status: 'Single' | 'Married' | 'Divorced' | 'Widowed'
+          parental_status: 'Has children' | 'No children'
+          referral_source: string
+          headshot_url: string | null
+          created_at: string
+          updated_at: string
+          created_by: string
+          updated_by: string
+        }
+        Insert: {
+          id?: string
+          user_id: string
+          address: string
+          gender: 'Male' | 'Female' | 'Non-binary' | 'Other' | 'Prefer not to say'
+          ssn_last_four: string
+          marital_status: 'Single' | 'Married' | 'Divorced' | 'Widowed'
+          parental_status: 'Has children' | 'No children'
+          referral_source: string
+          headshot_url?: string | null
+          created_at?: string
+          updated_at?: string
+          created_by: string
+          updated_by: string
+        }
+        Update: {
+          id?: string
+          user_id?: string
+          address?: string
+          gender?: 'Male' | 'Female' | 'Non-binary' | 'Other' | 'Prefer not to say'
+          ssn_last_four?: string
+          marital_status?: 'Single' | 'Married' | 'Divorced' | 'Widowed'
+          parental_status?: 'Has children' | 'No children'
+          referral_source?: string
+          headshot_url?: string | null
+          created_at?: string
+          updated_at?: string
+          created_by?: string
+          updated_by?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "b2c_lead_info_user_id_fkey"
+            columns: ["user_id"]
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          }
+        ]
+      }
     }
     Views: {
       [_ in never]: never
