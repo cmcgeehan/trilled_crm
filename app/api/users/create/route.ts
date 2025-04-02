@@ -156,7 +156,7 @@ export async function POST(request: Request) {
     }
 
     // Insert user into database
-    const { error: insertError } = await supabase
+    const { data: createdUser, error: insertError } = await supabase
       .from('users')
       .insert({
         ...insertData,
@@ -178,7 +178,7 @@ export async function POST(request: Request) {
     if (['lead', 'customer'].includes(userData.role)) {
       const followUpDates = calculateFollowUpDates(new Date(), userData.role)
       const followUpsToCreate = followUpDates.map(date => ({
-        due_date: date.toISOString(),
+        date: date.toISOString(),
         type: 'email',
         user_id: userId,
         completed_at: null,
@@ -205,8 +205,8 @@ export async function POST(request: Request) {
       }
     }
 
-    console.log('API: Successfully created user:', insertData)
-    return NextResponse.json(insertData)
+    console.log('API: Successfully created user:', createdUser)
+    return NextResponse.json(createdUser)
   } catch (error) {
     console.error('API: Error in create route:', error)
     return NextResponse.json({ error: error instanceof Error ? error.message : 'Unknown error' }, { status: 500 })
