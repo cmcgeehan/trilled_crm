@@ -6,11 +6,10 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input"
 import { Mail, Lock } from "lucide-react"
 import { supabase } from "@/lib/supabase"
-import { useRouter, useSearchParams } from "next/navigation"
+import { useSearchParams } from "next/navigation"
 import { AuthError } from "@supabase/supabase-js"
 
 function LoginForm() {
-  const router = useRouter()
   const searchParams = useSearchParams()
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
@@ -23,21 +22,34 @@ function LoginForm() {
     setError(null)
 
     try {
+      console.log('Attempting sign in...')
       const { data, error: signInError } = await supabase.auth.signInWithPassword({
         email,
         password
       })
 
-      if (signInError) throw signInError
-
-      if (data.session) {
-        // After successful login, refresh the page which will trigger the middleware
-        router.refresh()
-        
-        // Use router.push which will go through the middleware
-        const redirectTo = searchParams?.get('redirectTo') || '/'
-        router.push(redirectTo)
+      if (signInError) {
+        console.error('Sign in error:', signInError)
+        throw signInError
       }
+
+      if (!data.session) {
+        console.error('No session returned after successful sign in')
+        throw new Error('No session returned after successful sign in')
+      }
+
+      console.log('Sign in successful, session:', data.session ? 'exists' : 'none')
+      console.log('Session user:', data.session.user.email)
+      
+      // Get the redirect URL from search params or default to home
+      const redirectTo = searchParams?.get('redirectedFrom') || '/'
+      console.log('Redirecting to:', redirectTo)
+      
+      // Force a hard navigation instead of using Next.js router
+      // Add a small delay to ensure cookies are set
+      setTimeout(() => {
+        window.location.href = redirectTo
+      }, 500) // Increased delay to ensure cookies are set
     } catch (error) {
       console.error('Sign in error:', error)
       setError(error instanceof AuthError ? error.message : 'An error occurred during sign in')
