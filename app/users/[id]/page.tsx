@@ -100,6 +100,7 @@ type B2CLeadInfo = {
   parental_status: 'Has children' | 'No children';
   referral_source: string;
   headshot_url: string | null;
+  dob: string;
 }
 
 const lostReasons = [
@@ -194,6 +195,11 @@ export default function CustomerDetailPage({ params }: { params: Promise<{ id: s
         referrer_id: customer.referring_user_id || null,
         referring_user_id: customer.referring_user_id || null,
       })
+      
+      // Load B2C lead info if this is a potential customer
+      if (customer.lead_type === 'potential_customer') {
+        loadB2CLeadInfo();
+      }
     }
   }, [customer])
 
@@ -761,17 +767,17 @@ export default function CustomerDetailPage({ params }: { params: Promise<{ id: s
         },
         body: JSON.stringify({
           id: editedCustomer.id,
-          first_name: editedCustomer.first_name,
-          last_name: editedCustomer.last_name,
-          email: editedCustomer.email,
-          phone: editedCustomer.phone,
-          position: editedCustomer.position,
+          first_name: formData.first_name,
+          last_name: formData.last_name,
+          email: formData.email,
+          phone: formData.phone,
+          position: formData.position,
           company_id: formData.company_id,
           referrer_id: formData.referrer_id,
-          notes: editedCustomer.notes,
-          status: editedCustomer.status,
-          owner_id: editedCustomer.owner_id,
-          role: editedCustomer.role,
+          notes: formData.notes,
+          status: formData.status,
+          owner_id: formData.owner_id,
+          role: formData.role,
           lead_type: formData.lead_type
         })
       })
@@ -805,8 +811,8 @@ export default function CustomerDetailPage({ params }: { params: Promise<{ id: s
       setCustomer(updatedCustomer)
       setEditedCustomer(updatedCustomer)
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to update customer')
       console.error('Error updating customer:', err)
+      setError(err instanceof Error ? err.message : 'Failed to update customer')
     } finally {
       setLoading(false)
     }
@@ -1059,7 +1065,8 @@ export default function CustomerDetailPage({ params }: { params: Promise<{ id: s
             marital_status: 'Single',
             parental_status: 'No children',
             referral_source: '',
-            headshot_url: null
+            headshot_url: null,
+            dob: ''
           })
           .select()
           .single();
@@ -1102,6 +1109,7 @@ export default function CustomerDetailPage({ params }: { params: Promise<{ id: s
         parental_status: b2cLeadInfo.parental_status || 'No children',
         referral_source: b2cLeadInfo.referral_source || '',
         headshot_url: b2cLeadInfo.headshot_url,
+        dob: b2cLeadInfo.dob || '',
         updated_by: session.user.id
       };
 
@@ -1454,7 +1462,7 @@ export default function CustomerDetailPage({ params }: { params: Promise<{ id: s
       <Tabs value={activeTab} onValueChange={setActiveTab} className="bg-white rounded-lg shadow">
         <TabsList className="w-full bg-gray-100 p-1 rounded-t-lg">
           <TabsTrigger value="info" className="flex-1 data-[state=active]:bg-white data-[state=active]:shadow-sm">
-            Basic Information
+            Face Sheet
           </TabsTrigger>
           <TabsTrigger value="cases" className="flex-1 data-[state=active]:bg-white data-[state=active]:shadow-sm">
             Cases
@@ -1516,16 +1524,18 @@ export default function CustomerDetailPage({ params }: { params: Promise<{ id: s
                         disabled={!isEditable}
                       />
                     </div>
-                    <div>
-                      <Label htmlFor="linkedin">LinkedIn</Label>
-                      <Input
-                        id="linkedin"
-                        value={customer?.linkedin || ''}
-                        onChange={(e) => setEditedCustomer(prev => ({ ...prev!, linkedin: e.target.value }))}
-                        className="mt-1"
-                        disabled={!isEditable}
-                      />
-                    </div>
+                    {formData.lead_type === 'referral_partner' && (
+                      <div>
+                        <Label htmlFor="linkedin">LinkedIn</Label>
+                        <Input
+                          id="linkedin"
+                          value={customer?.linkedin || ''}
+                          onChange={(e) => setEditedCustomer(prev => ({ ...prev!, linkedin: e.target.value }))}
+                          className="mt-1"
+                          disabled={!isEditable}
+                        />
+                      </div>
+                    )}
                   </div>
                 </div>
 
@@ -1699,9 +1709,9 @@ export default function CustomerDetailPage({ params }: { params: Promise<{ id: s
             {/* B2C Lead Information */}
             {customer?.lead_type === 'potential_customer' && (
               <div className="mt-8 border-t pt-8">
-                <h3 className="text-lg font-semibold mb-4">B2C Lead Information</h3>
+                <h3 className="text-lg font-semibold mb-4">Patient Information</h3>
                 {isLoadingB2CInfo ? (
-                  <p>Loading B2C lead information...</p>
+                  <p>Loading patient information...</p>
                 ) : (
                   <div className="grid grid-cols-2 gap-8">
                     <div className="space-y-4">
@@ -1743,6 +1753,17 @@ export default function CustomerDetailPage({ params }: { params: Promise<{ id: s
                           onChange={(e) => setB2cLeadInfo(prev => ({ ...prev!, ssn_last_four: e.target.value }))}
                           className="mt-1"
                           maxLength={4}
+                          disabled={!isEditable}
+                        />
+                      </div>
+                      <div>
+                        <Label htmlFor="dob">Date of Birth</Label>
+                        <Input
+                          id="dob"
+                          type="date"
+                          value={b2cLeadInfo?.dob || ''}
+                          onChange={(e) => setB2cLeadInfo(prev => ({ ...prev!, dob: e.target.value }))}
+                          className="mt-1"
                           disabled={!isEditable}
                         />
                       </div>
@@ -1793,6 +1814,17 @@ export default function CustomerDetailPage({ params }: { params: Promise<{ id: s
                           onChange={(e) => setB2cLeadInfo(prev => ({ ...prev!, referral_source: e.target.value }))}
                           className="mt-1"
                           disabled={!isEditable}
+                        />
+                      </div>
+                      <div>
+                        <Label htmlFor="headshot_url">Headshot URL</Label>
+                        <Input
+                          id="headshot_url"
+                          value={b2cLeadInfo?.headshot_url || ''}
+                          onChange={(e) => setB2cLeadInfo(prev => ({ ...prev!, headshot_url: e.target.value }))}
+                          className="mt-1"
+                          disabled={!isEditable}
+                          placeholder="https://example.com/image.jpg"
                         />
                       </div>
                     </div>
