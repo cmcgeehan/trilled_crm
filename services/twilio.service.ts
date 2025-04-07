@@ -5,18 +5,20 @@ const authToken = process.env.TWILIO_AUTH_TOKEN;
 const twimlAppSid = process.env.TWILIO_TWIML_APP_SID;
 const phoneNumber = process.env.TWILIO_PHONE_NUMBER;
 
-if (!accountSid || !authToken || !twimlAppSid || !phoneNumber) {
-  throw new Error('Missing Twilio environment variables');
-}
-
-const client = twilio(accountSid, authToken);
+// Only initialize the client if all required variables are present
+const client = accountSid && authToken ? twilio(accountSid, authToken) : null;
 
 export async function sendSMS(to: string, body: string) {
+  if (!client || !phoneNumber) {
+    console.warn('Twilio client not initialized - SMS functionality disabled');
+    return { success: false, error: 'Twilio not configured' };
+  }
+
   try {
     const message = await client.messages.create({
       body,
       to,
-      from: phoneNumber as string
+      from: phoneNumber
     });
     return message;
   } catch (error) {
@@ -26,10 +28,15 @@ export async function sendSMS(to: string, body: string) {
 }
 
 export async function makeCall(to: string, url: string) {
+  if (!client || !phoneNumber || !twimlAppSid) {
+    console.warn('Twilio client not initialized - Call functionality disabled');
+    return { success: false, error: 'Twilio not configured' };
+  }
+
   try {
     const call = await client.calls.create({
       to,
-      from: phoneNumber as string,
+      from: phoneNumber,
       url,
       applicationSid: twimlAppSid
     });
@@ -41,6 +48,11 @@ export async function makeCall(to: string, url: string) {
 }
 
 export async function updateCallStatus(callSid: string, status: 'completed' | 'canceled') {
+  if (!client) {
+    console.warn('Twilio client not initialized - Call status update disabled');
+    return { success: false, error: 'Twilio not configured' };
+  }
+
   try {
     const call = await client.calls(callSid).update({ status });
     return call;
