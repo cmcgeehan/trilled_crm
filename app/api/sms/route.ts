@@ -1,7 +1,5 @@
 import { NextResponse } from 'next/server';
-import { TwilioService } from '@/services/twilio.service';
-
-const twilioService = new TwilioService();
+import { sendSMS } from '@/services/twilio.service';
 
 export async function POST(request: Request) {
   try {
@@ -14,7 +12,7 @@ export async function POST(request: Request) {
       );
     }
 
-    const result = await twilioService.sendSMS(to, body);
+    const result = await sendSMS(to, body);
     
     return NextResponse.json(result);
   } catch (error) {

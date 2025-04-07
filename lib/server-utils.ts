@@ -1,7 +1,10 @@
-import { NextResponse } from 'next/server'
 import { Database } from '@/types/supabase'
 import { createServerClient } from '@supabase/ssr'
-import { cookies } from 'next/headers'
+
+export type CookieOptions = {
+  expires?: Date
+  path?: string
+}
 
 export function createCookieHandlers(request: Request, response: Response) {
   return {
@@ -11,14 +14,14 @@ export function createCookieHandlers(request: Request, response: Response) {
       const match = cookie.match(new RegExp(`(^| )${name}=([^;]+)`))
       return match ? match[2] : undefined
     },
-    set: (name: string, value: string, options: any) => {
+    set: (name: string, value: string, options: CookieOptions) => {
       const { expires, path = '/' } = options
       response.headers.set(
         'Set-Cookie',
         `${name}=${value}; Path=${path}; HttpOnly; Secure; SameSite=Lax${expires ? `; Expires=${expires.toUTCString()}` : ''}`
       )
     },
-    remove: (name: string, options: any) => {
+    remove: (name: string, options: CookieOptions) => {
       const { path = '/' } = options
       response.headers.set(
         'Set-Cookie',
@@ -68,9 +71,4 @@ export const getServerOrganization = async () => {
     .single()
 
   return organization
-}
-
-export type CookieOptions = {
-  expires?: Date
-  path?: string
 } 
