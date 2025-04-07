@@ -1,7 +1,9 @@
 import { createServerClient } from '@supabase/ssr'
 import { createClient } from '@supabase/supabase-js'
 import { NextResponse } from 'next/server'
+import type { Database } from '@/types/supabase'
 import { calculateFollowUpDates } from '@/lib/utils'
+import { createCookieHandlers, copyResponseHeaders } from '@/lib/server-utils'
 
 // Ensure required environment variables are present
 if (!process.env.NEXT_PUBLIC_SUPABASE_URL || !process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
@@ -12,6 +14,9 @@ export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 
 export async function POST(request: Request) {
+  const response = new NextResponse()
+  const cookieHandlers = createCookieHandlers(request, response)
+
   try {
     const userData = await request.json()
     console.log('API: Received user data:', userData)
@@ -29,24 +34,11 @@ export async function POST(request: Request) {
     )
 
     // Create a regular client for session verification
-    const supabase = createServerClient(
+    const supabase = createServerClient<Database>(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
       process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
       {
-        cookies: {
-          get(name: string) {
-            const cookie = request.headers.get('cookie')
-            if (!cookie) return undefined
-            const match = cookie.match(new RegExp(`${name}=([^;]+)`))
-            return match ? match[1] : undefined
-          },
-          set() {
-            // Cookies are handled by middleware
-          },
-          remove() {
-            // Cookies are handled by middleware
-          },
-        },
+        cookies: cookieHandlers
       }
     )
     
@@ -205,10 +197,11 @@ export async function POST(request: Request) {
       }
     }
 
-    console.log('API: Successfully created user:', createdUser)
-    return NextResponse.json(createdUser)
+    // Copy headers from response to the final response
+    const finalResponse = NextResponse.json(createdUser)
+    return copyResponseHeaders(response, finalResponse)
   } catch (error) {
-    console.error('API: Error in create route:', error)
-    return NextResponse.json({ error: error instanceof Error ? error.message : 'Unknown error' }, { status: 500 })
+    console.error('API: Unexpected error:', error)
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
   }
 } 

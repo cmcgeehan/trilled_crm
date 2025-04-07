@@ -20,7 +20,7 @@ type FormData = {
   email: string;
   phone: string;
   position: string;
-  role: 'lead' | 'customer';
+  role: UserRole;
   status: 'new' | 'contacted' | 'qualified' | 'proposal' | 'negotiation' | 'closed_won' | 'closed_lost';
   owner_id: string | null;
   notes: string;
@@ -31,6 +31,8 @@ type FormData = {
   lead_source: 'google_ads' | 'organic' | 'referral' | 'other' | null;
   organization_id: string | null;
   password: string;
+  created_at?: string;
+  created_by?: string;
 }
 
 const initialFormData: FormData = {
@@ -50,6 +52,7 @@ const initialFormData: FormData = {
   lead_source: null,
   organization_id: null,
   password: "",
+  created_at: new Date().toISOString()
 }
 
 function NewUserForm() {
@@ -379,7 +382,7 @@ function NewUserForm() {
                 <Label htmlFor="role">Role *</Label>
                 <Select
                   value={formData.role}
-                  onValueChange={(value) => setFormData(prev => ({ ...prev, role: value as 'lead' | 'customer' }))}
+                  onValueChange={(value) => setFormData(prev => ({ ...prev, role: value as UserRole }))}
                 >
                   <SelectTrigger id="role" className="mt-1">
                     <SelectValue placeholder="Select role" />

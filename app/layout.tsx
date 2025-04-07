@@ -1,7 +1,9 @@
 import "./globals.css"
 import { Inter } from "next/font/google"
 import { OrganizationProvider } from "@/lib/context/organization-context"
+import { UserProvider } from "@/lib/context/user-context"
 import { LayoutWrapper } from "@/components/layout-wrapper"
+import { PhoneHUD } from '@/components/phone/phone-hud'
 
 const inter = Inter({
   subsets: ["latin"],
@@ -22,11 +24,14 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body className={`${inter.variable} font-sans antialiased`}>
-        <OrganizationProvider>
-          <div className="min-h-screen bg-gray-100">
-            <LayoutWrapper>{children}</LayoutWrapper>
-          </div>
-        </OrganizationProvider>
+        <UserProvider>
+          <OrganizationProvider>
+            <div className="min-h-screen bg-gray-100">
+              <LayoutWrapper>{children}</LayoutWrapper>
+              <PhoneHUD />
+            </div>
+          </OrganizationProvider>
+        </UserProvider>
       </body>
     </html>
   )

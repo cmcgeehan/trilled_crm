@@ -14,6 +14,7 @@ import { cn } from "@/lib/utils"
 import { useRouter } from "next/navigation"
 import { Database } from "@/types/supabase"
 import { toast } from "react-hot-toast"
+import { CallButton } from "@/components/call/call-button"
 
 type User = Omit<Database['public']['Tables']['users']['Row'], 'status'> & {
   status: UserStatus,
@@ -371,6 +372,7 @@ export default function UsersPage() {
               <TableHead className="text-sm font-medium">Phone</TableHead>
               <TableHead className="text-sm font-medium">Position</TableHead>
               <TableHead className="text-sm font-medium">Company</TableHead>
+              <TableHead className="text-sm font-medium">Actions</TableHead>
               <TableHead 
                 className="text-sm font-medium cursor-pointer"
                 onClick={() => handleSort('status')}
@@ -422,6 +424,23 @@ export default function UsersPage() {
                   <TableCell className="py-2 text-sm">{user.phone || <span className="text-gray-400">No phone</span>}</TableCell>
                   <TableCell className="py-2 text-sm">{user.position || <span className="text-gray-400">No position</span>}</TableCell>
                   <TableCell className="py-2 text-sm">{user.companies?.name || <span className="text-gray-400">No company</span>}</TableCell>
+                  <TableCell className="py-2">
+                    <div className="flex items-center gap-2">
+                      <Button
+                        variant="ghost"
+                        onClick={() => router.push(`/users/${user.id}`)}
+                      >
+                        View
+                      </Button>
+                      {user.phone && (
+                        <CallButton 
+                          phoneNumber={user.phone}
+                          variant="ghost"
+                          size="icon"
+                        />
+                      )}
+                    </div>
+                  </TableCell>
                   <TableCell className="py-2">
                     <div 
                       className={cn(

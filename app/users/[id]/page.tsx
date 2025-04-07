@@ -1,7 +1,7 @@
 "use client"
 
-import { useState, useEffect, useRef, useCallback, use } from "react"
-import { useSearchParams, useRouter } from "next/navigation"
+import { useState, useEffect, useRef, useCallback } from "react"
+import { useSearchParams, useRouter, useParams } from "next/navigation"
 import Link from "next/link"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Button } from "@/components/ui/button"
@@ -9,11 +9,9 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Play, Calendar, ChevronLeft, ChevronRight, Check } from "lucide-react"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
-import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { format } from "date-fns"
@@ -26,6 +24,7 @@ import { OwnerCombobox } from "@/components/ui/owner-combobox"
 import { MessageInput } from "@/components/message-input"
 import { ReferralPartnerCompanyCombobox } from "@/components/ui/referral-partner-company-combobox"
 import { VOBForm } from "@/components/vob-form"
+import { CallButton } from "@/components/call/call-button"
 
 type UserRole = Database['public']['Tables']['users']['Row']['role']
 type FollowUpType = 'email' | 'sms' | 'call' | 'meeting' | 'tour'
@@ -103,14 +102,6 @@ type B2CLeadInfo = {
   dob: string;
 }
 
-const lostReasons = [
-  { id: "budget", label: "Budget constraints" },
-  { id: "competitor", label: "Chose a competitor" },
-  { id: "timing", label: "Bad timing" },
-  { id: "needs", label: "Needs not met" },
-  { id: "other", label: "Other" },
-]
-
 const followUpTypes = [
   { value: "email" as const, label: "Email" },
   { value: "sms" as const, label: "SMS" },
@@ -131,33 +122,31 @@ const getCustomerDisplayName = (customer: Customer | null) => {
   return [customer.first_name, customer.last_name].filter(Boolean).join(' ') || 'Unnamed Customer'
 }
 
-export default function CustomerDetailPage({ params }: { params: Promise<{ id: string }> }) {
-  const id = use(params).id
-  const searchParams = useSearchParams()
-  const [activeTab, setActiveTab] = useState("cases")
-  const [customer, setCustomer] = useState<Customer | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | React.ReactNode | null>(null)
-  const [activeCase, setActiveCase] = useState<Case | null>(null)
-  const [cases, setCases] = useState<Case[]>([])
-  const [responseChannel, setResponseChannel] = useState("internal")
-  const [responseMessage, setResponseMessage] = useState("")
-  const [editedCustomer, setEditedCustomer] = useState<Customer | null>(null)
-  const [isMarkingAsLost, setIsMarkingAsLost] = useState(false)
-  const [lostReason, setLostReason] = useState("")
-  const [otherReason, setOtherReason] = useState("")
-  const [followUps, setFollowUps] = useState<FollowUp[]>([])
-  const [selectedFollowUp, setSelectedFollowUp] = useState<FollowUp | null>(null)
-  const [agents, setAgents] = useState<Agent[]>([])
-  const [isUpdatingFollowUps, setIsUpdatingFollowUps] = useState(false)
-  const [isDeleting, setIsDeleting] = useState(false)
-  const [deleteError, setDeleteError] = useState<string | null>(null)
-  const [currentUserRole, setCurrentUserRole] = useState<UserRole | null>(null)
-  const [isEditable, setIsEditable] = useState<boolean>(false)
-  const router = useRouter()
-  const scrollContainerRef = useRef<HTMLDivElement>(null)
-  const [companies, setCompanies] = useState<Database['public']['Tables']['companies']['Row'][]>([])
-  const [currentUser, setCurrentUser] = useState<Database['public']['Tables']['users']['Row'] | null>(null)
+export default function CustomerDetailPage() {
+  // Navigation hooks
+  const params = useParams();
+  const searchParams = useSearchParams();
+  const router = useRouter();
+  const id = params?.id as string;
+  
+  // State hooks
+  const [activeTab, setActiveTab] = useState('cases');
+  const [customer, setCustomer] = useState<Customer | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | React.ReactNode | null>(null);
+  const [activeCase, setActiveCase] = useState<Case | null>(null);
+  const [cases, setCases] = useState<Case[]>([]);
+  const [responseChannel, setResponseChannel] = useState("internal");
+  const [responseMessage, setResponseMessage] = useState("");
+  const [editedCustomer, setEditedCustomer] = useState<Customer | null>(null);
+  const [followUps, setFollowUps] = useState<FollowUp[]>([]);
+  const [selectedFollowUp, setSelectedFollowUp] = useState<FollowUp | null>(null);
+  const [agents, setAgents] = useState<Agent[]>([]);
+  const [isUpdatingFollowUps, setIsUpdatingFollowUps] = useState(false);
+  const [currentUserRole, setCurrentUserRole] = useState<UserRole | null>(null);
+  const [isEditable, setIsEditable] = useState<boolean>(false);
+  const [companies, setCompanies] = useState<Database['public']['Tables']['companies']['Row'][]>([]);
+  const [currentUser, setCurrentUser] = useState<Database['public']['Tables']['users']['Row'] | null>(null);
   const [formData, setFormData] = useState<FormData>({
     first_name: customer?.first_name || "",
     last_name: customer?.last_name || "",
@@ -172,12 +161,131 @@ export default function CustomerDetailPage({ params }: { params: Promise<{ id: s
     company_id: customer?.company_id || null,
     referrer_id: customer?.referring_user_id || null,
     referring_user_id: customer?.referring_user_id || null,
-  })
-  const [b2cLeadInfo, setB2cLeadInfo] = useState<B2CLeadInfo | null>(null)
-  const [isLoadingB2CInfo, setIsLoadingB2CInfo] = useState(false)
-  const [referringUsers, setReferringUsers] = useState<Database['public']['Tables']['users']['Row'][]>([])
+  });
+  const [b2cLeadInfo, setB2cLeadInfo] = useState<B2CLeadInfo | null>(null);
+  const [isLoadingB2CInfo, setIsLoadingB2CInfo] = useState(false);
+  const [referringUsers, setReferringUsers] = useState<Database['public']['Tables']['users']['Row'][]>([]);
 
-  // Add this useEffect to update form data when customer changes
+  // Ref hooks
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
+
+  // Callback hooks
+  const loadB2CLeadInfo = useCallback(async () => {
+    if (!customer || customer.lead_type !== 'potential_customer') return;
+    
+    setIsLoadingB2CInfo(true);
+    try {
+      // First try to get existing record
+      const { data: existingData, error: fetchError } = await supabase
+        .from('b2c_lead_info')
+        .select('*')
+        .eq('user_id', id)
+        .single();
+
+      if (fetchError && fetchError.code === 'PGRST116') {
+        // No record exists, create a new one
+        const { data: newData, error: insertError } = await supabase
+          .from('b2c_lead_info')
+          .insert({
+            user_id: id,
+            address: '',
+            gender: 'Prefer not to say',
+            ssn_last_four: '',
+            marital_status: 'Single',
+            parental_status: 'No children',
+            referral_source: '',
+            headshot_url: null,
+            dob: ''
+          })
+          .select()
+          .single();
+
+        if (insertError) throw insertError;
+        setB2cLeadInfo(newData);
+      } else if (fetchError) {
+        throw fetchError;
+      } else {
+        setB2cLeadInfo(existingData);
+      }
+    } catch (err) {
+      console.error('Error loading B2C lead info:', err);
+    } finally {
+      setIsLoadingB2CInfo(false);
+    }
+  }, [customer, id]);
+
+  const handleMarkAsLost = useCallback(async () => {
+    if (!customer) return;
+
+    try {
+      setLoading(true);
+      setError(null);
+
+      // Update user status to lost
+      const { error: updateError } = await supabase
+        .from('users')
+        .update({ 
+          status: 'lost',
+          lost_at: new Date().toISOString()
+        })
+        .eq('id', customer.id)
+        .is('deleted_at', null);
+
+      if (updateError) throw updateError;
+
+      // Refresh the page to show updated status
+      router.refresh();
+    } catch (err) {
+      console.error('Error marking as lost:', err);
+      setError(err instanceof Error ? err.message : 'Failed to mark as lost');
+    } finally {
+      setLoading(false);
+    }
+  }, [customer, router]);
+
+  const handleDelete = useCallback(async () => {
+    if (!customer) return;
+
+    try {
+      setLoading(true);
+      setError(null);
+
+      // First verify we can access this user
+      const { data: userCheck, error: checkError } = await supabase
+        .from('users')
+        .select('id')
+        .eq('id', customer.id)
+        .is('deleted_at', null)
+        .single();
+
+      if (checkError) {
+        throw new Error('Could not verify user access');
+      }
+
+      if (!userCheck) {
+        throw new Error('User not found or already deleted');
+      }
+
+      // Perform soft delete operation
+      const { error } = await supabase
+        .from('users')
+        .update({ deleted_at: new Date().toISOString() })
+        .eq('id', customer.id)
+        .is('deleted_at', null);
+
+      if (error) throw error;
+
+      // Redirect to users list
+      router.push('/users');
+    } catch (err) {
+      console.error('Delete error:', err);
+      setError(err instanceof Error ? err.message : 'Failed to delete user');
+    } finally {
+      setLoading(false);
+    }
+  }, [customer, router]);
+
+  // Effect hooks
   useEffect(() => {
     if (customer) {
       setFormData({
@@ -201,7 +309,7 @@ export default function CustomerDetailPage({ params }: { params: Promise<{ id: s
         loadB2CLeadInfo();
       }
     }
-  }, [customer])
+  }, [customer, loadB2CLeadInfo])
 
   const loadCompanies = useCallback(async () => {
     try {
@@ -818,110 +926,41 @@ export default function CustomerDetailPage({ params }: { params: Promise<{ id: s
     }
   }
 
-  const handleMarkAsLost = async () => {
-    if (!customer) return
-
-    try {
-      setLoading(true)
-      const updates: Database['public']['Tables']['users']['Update'] = {
-        lost_reason: lostReason || null,
-        lost_at: new Date().toISOString(),
-        status: 'lost'
-      }
-
-      const { error: markError } = await supabase
-        .from('users')
-        .update(updates)
-        .eq('id', id)
-
-      if (markError) throw markError
-
-      setCustomer(prev => prev ? {
-        ...prev,
-        lost_reason: lostReason || null,
-        lost_at: new Date().toISOString(),
-        status: 'lost'
-      } : null)
-    } catch (err) {
-      console.error('Error marking customer as lost:', err)
-    } finally {
-      setLoading(false)
-      setIsMarkingAsLost(false)
-    }
-  }
-
-  const handleConvertToCustomer = async () => {
-    if (!customer) return
-
-    try {
-      setLoading(true)
-      
-      // Call the convert-to-customer API endpoint
-      const response = await fetch('/api/users/convert-to-customer', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          userId: customer.id
-        })
-      })
-
-      if (!response.ok) {
-        const data = await response.json()
-        throw new Error(data.error || 'Failed to convert to customer')
-      }
-
-      // Update local state
-      setCustomer(prev => prev ? {
-        ...prev,
-        role: 'customer',
-        status: 'won'
-      } : null)
-
-      // Reload follow-ups to show new sequence
-      await loadFollowUps()
-    } catch (err) {
-      console.error('Error converting to customer:', err)
-      setError(err instanceof Error ? err.message : 'Failed to convert to customer')
-    } finally {
-      setLoading(false)
-    }
-  }
-
   const handleUpdateFollowUp = async (followUp: FollowUp, updates: Partial<FollowUp>) => {
-    setIsUpdatingFollowUps(true)
-    setError(null)
+    if (!customer) return;
+    
+    setIsUpdatingFollowUps(true);
+    setError(null);
 
     try {
       const updateData: Partial<FollowUp> = {
         type: updates.type || followUp?.type,
         notes: updates.notes || followUp?.notes,
         completed_at: updates.completed_at || null
-      }
+      };
 
       // Handle date updates
       if (updates.date) {
-        updateData.date = updates.date
+        updateData.date = updates.date;
 
         // Find all follow-ups after the selected one
         const { data: laterFollowUps } = await supabase
           .from('follow_ups')
           .select('*')
-          .eq('user_id', id)
+          .eq('user_id', customer.id)
           .gt('date', followUp.date)
-          .order('date', { ascending: true })
+          .order('date', { ascending: true });
 
         if (laterFollowUps) {
           // Update each follow-up's date to be 1 day after the previous one
           for (let i = 0; i < laterFollowUps.length; i++) {
-            const currentDate = new Date(updates.date)
-            currentDate.setDate(currentDate.getDate() + i + 1)
+            const currentDate = new Date(updates.date);
+            currentDate.setDate(currentDate.getDate() + i + 1);
             
             await supabase
               .from('follow_ups')
               .update({ date: currentDate.toISOString() })
-              .eq('id', laterFollowUps[i].id)
+              .eq('id', laterFollowUps[i].id);
           }
         }
       }
@@ -930,19 +969,19 @@ export default function CustomerDetailPage({ params }: { params: Promise<{ id: s
       const { error } = await supabase
         .from('follow_ups')
         .update(updateData)
-        .eq('id', followUp.id)
+        .eq('id', followUp.id);
 
-      if (error) throw error
+      if (error) throw error;
 
       // Refresh the list
-      await loadFollowUps()
+      await loadFollowUps();
     } catch (err) {
-      console.error('Error updating follow-up:', err)
-      setError(err instanceof Error ? err.message : 'Failed to update follow-up')
+      console.error('Error updating follow-up:', err);
+      setError(err instanceof Error ? err.message : 'Failed to update follow-up');
     } finally {
-      setIsUpdatingFollowUps(false)
+      setIsUpdatingFollowUps(false);
     }
-  }
+  };
 
   const createFollowUp = async () => {
     if (!customer) return
@@ -979,33 +1018,6 @@ export default function CustomerDetailPage({ params }: { params: Promise<{ id: s
     }
   }
 
-  const handleDelete = async () => {
-    try {
-      setIsDeleting(true)
-      setDeleteError(null)
-
-      // Soft delete the user by setting deleted_at
-      const { error: deleteError } = await supabase
-        .from('users')
-        .update({ 
-          deleted_at: new Date().toISOString(),
-          status: 'lost' as const // Change to 'lost' instead of 'inactive'
-        })
-        .eq('id', id)
-
-      if (deleteError) throw deleteError
-
-      // Redirect to users list
-      router.push('/users')
-      router.refresh()
-    } catch (err) {
-      setDeleteError(err instanceof Error ? err.message : 'Failed to delete user')
-      console.error('Error deleting user:', err)
-    } finally {
-      setIsDeleting(false)
-    }
-  }
-
   const formatDateSafe = (dateStr: string | null | undefined): string => {
     if (!dateStr) return ''
     try {
@@ -1039,51 +1051,6 @@ export default function CustomerDetailPage({ params }: { params: Promise<{ id: s
 
     loadCurrentUser()
   }, [])
-
-  // Add this function to load B2C lead info
-  const loadB2CLeadInfo = async () => {
-    if (!customer || customer.lead_type !== 'potential_customer') return;
-    
-    setIsLoadingB2CInfo(true);
-    try {
-      // First try to get existing record
-      const { data: existingData, error: fetchError } = await supabase
-        .from('b2c_lead_info')
-        .select('*')
-        .eq('user_id', id)
-        .single();
-
-      if (fetchError && fetchError.code === 'PGRST116') {
-        // No record exists, create a new one
-        const { data: newData, error: insertError } = await supabase
-          .from('b2c_lead_info')
-          .insert({
-            user_id: id,
-            address: '',
-            gender: 'Prefer not to say',
-            ssn_last_four: '',
-            marital_status: 'Single',
-            parental_status: 'No children',
-            referral_source: '',
-            headshot_url: null,
-            dob: ''
-          })
-          .select()
-          .single();
-
-        if (insertError) throw insertError;
-        setB2cLeadInfo(newData);
-      } else if (fetchError) {
-        throw fetchError;
-      } else {
-        setB2cLeadInfo(existingData);
-      }
-    } catch (err) {
-      console.error('Error loading B2C lead info:', err);
-    } finally {
-      setIsLoadingB2CInfo(false);
-    }
-  };
 
   // Add this function to handle B2C lead info updates
   const handleSaveB2CLeadInfo = async () => {
@@ -1205,87 +1172,22 @@ export default function CustomerDetailPage({ params }: { params: Promise<{ id: s
               ) : null}
             </p>
           </div>
-          <div className="flex items-start gap-4">
-            {customer?.role === 'lead' && customer?.status !== 'lost' && customer?.status !== 'won' && (
-              <>
-                <Dialog open={isMarkingAsLost} onOpenChange={setIsMarkingAsLost}>
-                  <DialogTrigger asChild>
-                    <Button
-                      variant="outline"
-                      className="border-brand-darkRed text-brand-darkRed hover:bg-brand-darkRed hover:text-white"
-                    >
-                      Mark as Lost
-                    </Button>
-                  </DialogTrigger>
-                  <DialogContent>
-                    <DialogHeader>
-                      <DialogTitle>Mark Lead as Lost</DialogTitle>
-                    </DialogHeader>
-                    <div className="py-4">
-                      <Label htmlFor="lost-reason" className="mb-2 block">
-                        Select a reason:
-                      </Label>
-                      <RadioGroup id="lost-reason" value={lostReason} onValueChange={setLostReason}>
-                        {lostReasons.map((reason) => (
-                          <div key={reason.id} className="flex items-center space-x-2">
-                            <RadioGroupItem value={reason.id} id={reason.id} />
-                            <Label htmlFor={reason.id}>{reason.label}</Label>
-                          </div>
-                        ))}
-                      </RadioGroup>
-                      {lostReason === "other" && (
-                        <Textarea
-                          placeholder="Please specify the reason"
-                          value={otherReason}
-                          onChange={(e) => setOtherReason(e.target.value)}
-                          className="mt-2"
-                        />
-                      )}
-                    </div>
-                    <DialogFooter>
-                      <Button variant="outline" onClick={() => setIsMarkingAsLost(false)}>
-                        Cancel
-                      </Button>
-                      <Button variant="destructive" onClick={handleMarkAsLost} disabled={loading}>
-                        {loading ? 'Marking as Lost...' : 'Mark as Lost'}
-                      </Button>
-                    </DialogFooter>
-                  </DialogContent>
-                </Dialog>
-                <Button
-                  onClick={handleConvertToCustomer}
-                  className="bg-brand-darkBlue hover:bg-brand-darkBlue/90 text-white"
-                >
-                  Mark as Won
-                </Button>
-              </>
+          <div className="flex items-center gap-2">
+            {customer?.phone && (
+              <CallButton 
+                phoneNumber={customer.phone}
+                variant="outline"
+                size="default"
+              />
             )}
-            <Dialog>
-              <DialogTrigger asChild>
-                <Button variant="outline" className="text-red-600 border-red-600 hover:bg-red-50" disabled={isDeleting}>
-                  {isDeleting ? 'Deleting...' : 'Delete User'}
-                </Button>
-              </DialogTrigger>
-              <DialogContent>
-                <DialogHeader>
-                  <DialogTitle>Are you sure you want to delete this user?</DialogTitle>
-                </DialogHeader>
-                <p className="text-muted-foreground">
-                  This action cannot be undone. This will permanently delete the user and all associated follow-ups.
-                </p>
-                {deleteError && (
-                  <div className="text-red-500">{deleteError}</div>
-                )}
-                <DialogFooter>
-                  <Button variant="outline" onClick={() => setIsDeleting(false)}>
-                    Cancel
-                  </Button>
-                  <Button variant="destructive" onClick={handleDelete} disabled={isDeleting}>
-                    {isDeleting ? 'Deleting...' : 'Delete'}
-                  </Button>
-                </DialogFooter>
-              </DialogContent>
-            </Dialog>
+            <Button 
+              asChild 
+              variant="outline" 
+              size="sm"
+              className="border-brand-darkBlue text-brand-darkBlue hover:bg-brand-darkBlue hover:text-brand-white"
+            >
+              <Link href={`/users/${customer?.id}`}>View Details</Link>
+            </Button>
           </div>
         </div>
       </div>
@@ -1865,6 +1767,12 @@ export default function CustomerDetailPage({ params }: { params: Promise<{ id: s
                     }
                   }} disabled={loading}>
                     {loading ? 'Saving...' : 'Save Changes'}
+                  </Button>
+                  <Button variant="destructive" onClick={handleMarkAsLost}>
+                    Mark as Lost
+                  </Button>
+                  <Button variant="destructive" onClick={handleDelete}>
+                    Delete User
                   </Button>
                 </>
               )}
