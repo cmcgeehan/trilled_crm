@@ -8,6 +8,8 @@ import { Database } from '@/types/supabase'
 export function AuthHandler() {
   const router = useRouter()
   const searchParams = useSearchParams()
+
+  // Create the browser client
   const supabase = createBrowserClient<Database>(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
@@ -45,34 +47,10 @@ export function AuthHandler() {
         router.push(`/auth/verify?token=${token}&type=${type}`)
         return
       }
-
-      // Check for session
-      const { data: { session } } = await supabase.auth.getSession()
-      
-      if (!session) {
-        console.log('No session found, redirecting to login')
-        router.replace('/login')
-        return
-      }
-
-      // If we have a session, redirect to dashboard
-      router.replace('/')
     }
 
     handleInitialLoad()
-  }, [router, searchParams, supabase.auth])
-
-  useEffect(() => {
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
-      if (event === 'SIGNED_OUT') {
-        router.push('/login')
-      }
-    })
-
-    return () => {
-      subscription.unsubscribe()
-    }
-  }, [router, supabase])
+  }, [router, searchParams, supabase])
 
   return (
     <div className="container flex items-center justify-center min-h-screen py-12">

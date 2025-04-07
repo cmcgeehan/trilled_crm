@@ -14,8 +14,11 @@ import {
 import { supabase } from "@/lib/supabase"
 import { useEffect, useState } from "react"
 import { cn } from "@/lib/utils"
-import { Users, LayoutDashboard, Building2, Building } from "lucide-react"
+import { Users, LayoutDashboard, Building2, Building, Phone } from "lucide-react"
 import { Database } from "@/types/supabase"
+import { Button } from "@/components/ui/button"
+import { CallOverlay } from "@/components/call/call-overlay"
+import { Skeleton } from "@/components/ui/skeleton"
 
 type Organization = Database['public']['Tables']['organizations']['Row']
 
@@ -26,13 +29,29 @@ export function NavBar() {
   const [isSuperAdmin, setIsSuperAdmin] = useState(false)
   const [organizations, setOrganizations] = useState<Organization[]>([])
   const [currentOrgId, setCurrentOrgId] = useState<string | null>(null)
+  const [isCallOverlayOpen, setIsCallOverlayOpen] = useState(false)
+  const [isLoading, setIsLoading] = useState(true)
 
   useEffect(() => {
     const getUser = async () => {
-      const { data: { session } } = await supabase.auth.getSession()
-      setUserEmail(session?.user?.email ?? null)
+      try {
+        // First check if we have a session
+        const { data: { session }, error: sessionError } = await supabase.auth.getSession()
+        
+        if (sessionError) {
+          console.error('Error getting session:', sessionError)
+          setIsLoading(false)
+          return
+        }
 
-      if (session?.user) {
+        if (!session) {
+          console.log('No session found')
+          setIsLoading(false)
+          return
+        }
+
+        setUserEmail(session.user.email || null)
+
         // Get user role and current organization
         const { data: userData, error: userError } = await supabase
           .from('users')
@@ -40,21 +59,22 @@ export function NavBar() {
           .eq('id', session.user.id)
           .single()
         
-        console.log('User data:', userData);
+        console.log('User data:', userData)
         if (userError) {
-          console.error('Error fetching user:', userError);
-          return;
+          console.error('Error fetching user:', userError)
+          setIsLoading(false)
+          return
         }
         
         if (userData) {
-          const isAdmin = userData.role === 'super_admin';
-          console.log('Is user super_admin?', isAdmin);
+          const isAdmin = userData.role === 'super_admin'
+          console.log('Is user super_admin?', isAdmin)
           setIsSuperAdmin(isAdmin)
           setCurrentOrgId(userData.organization_id)
 
           // If super admin, fetch all organizations
           if (isAdmin) {
-            console.log('Fetching organizations as super_admin');
+            console.log('Fetching organizations as super_admin')
             const { data: orgs, error: orgsError } = await supabase
               .from('organizations')
               .select(`
@@ -72,11 +92,12 @@ export function NavBar() {
               .order('name')
             
             if (orgsError) {
-              console.error('Error fetching organizations:', orgsError);
-              return;
+              console.error('Error fetching organizations:', orgsError)
+              setIsLoading(false)
+              return
             }
 
-            console.log('Found organizations:', orgs);
+            console.log('Found organizations:', orgs)
             setOrganizations(orgs || [])
 
             // If we have organizations but no current org ID, set the first one
@@ -87,25 +108,45 @@ export function NavBar() {
                 .eq('id', session.user.id)
 
               if (updateError) {
-                console.error('Error updating user organization:', updateError);
+                console.error('Error updating user organization:', updateError)
               } else {
                 setCurrentOrgId(orgs[0].id)
               }
             }
           }
         }
+      } catch (error) {
+        console.error('Error in getUser:', error)
+      } finally {
+        setIsLoading(false)
       }
     }
+
     getUser()
-  }, [])
+
+    // Set up auth state change listener
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (session?.user) {
+        setUserEmail(session.user.email || null)
+      } else {
+        setUserEmail(null)
+        router.push('/login')
+      }
+    })
+
+    return () => {
+      subscription.unsubscribe()
+    }
+  }, [router])
 
   // Add debug renders
   console.log('Render state:', {
     isSuperAdmin,
     organizationsCount: organizations.length,
     currentOrgId,
-    userEmail
-  });
+    userEmail,
+    isLoading
+  })
 
   const handleOrganizationChange = async (orgId: string) => {
     try {
@@ -143,7 +184,28 @@ export function NavBar() {
     }
   }
 
-  if (!userEmail) return null
+  if (isLoading) {
+    return (
+      <nav className="bg-white shadow-sm">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="flex justify-between h-16">
+            <div className="flex items-center space-x-4">
+              <Skeleton className="h-8 w-24" />
+              <Skeleton className="h-8 w-24" />
+              <Skeleton className="h-8 w-24" />
+            </div>
+            <div className="flex items-center space-x-4">
+              <Skeleton className="h-8 w-8 rounded-full" />
+            </div>
+          </div>
+        </div>
+      </nav>
+    )
+  }
+
+  if (!userEmail) {
+    return null
+  }
 
   return (
     <nav className="bg-white shadow-sm">
@@ -195,6 +257,13 @@ export function NavBar() {
             </div>
           </div>
           <div className="flex items-center space-x-4">
+            <Button
+              variant="outline"
+              size="icon"
+              onClick={() => setIsCallOverlayOpen(true)}
+            >
+              <Phone className="h-4 w-4" />
+            </Button>
             {isSuperAdmin && organizations.length > 0 && (
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
@@ -238,13 +307,17 @@ export function NavBar() {
                   <Link href="/settings/integrations">Integrations</Link>
                 </DropdownMenuItem>
                 <DropdownMenuItem onClick={handleSignOut}>
-                  Log out
+                  Sign Out
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
           </div>
         </div>
       </div>
+      <CallOverlay
+        isOpen={isCallOverlayOpen}
+        onClose={() => setIsCallOverlayOpen(false)}
+      />
     </nav>
   )
 } 
