@@ -1,12 +1,12 @@
 import { Button } from "@/components/ui/button";
 import { Phone } from "lucide-react";
+import { ButtonProps } from "@/components/ui/button";
 
-interface CallButtonProps {
+interface CallButtonProps extends ButtonProps {
   phoneNumber: string;
-  className?: string;
 }
 
-export function CallButton({ phoneNumber, className }: CallButtonProps) {
+export function CallButton({ phoneNumber, ...props }: CallButtonProps) {
   const handleCall = () => {
     window.location.href = `tel:${phoneNumber}`;
   };
@@ -16,7 +16,7 @@ export function CallButton({ phoneNumber, className }: CallButtonProps) {
       variant="outline"
       size="icon"
       onClick={handleCall}
-      className={className}
+      {...props}
     >
       <Phone className="h-4 w-4" />
     </Button>
