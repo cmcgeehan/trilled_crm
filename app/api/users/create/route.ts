@@ -3,7 +3,7 @@ import { createClient } from '@supabase/supabase-js'
 import { NextResponse } from 'next/server'
 import type { Database } from '@/types/supabase'
 import { calculateFollowUpDates } from '@/lib/utils'
-import { createCookieHandlers, copyResponseHeaders } from '@/lib/server-utils'
+import { createCookieHandlers } from '@/lib/server-utils'
 
 // Ensure required environment variables are present
 if (!process.env.NEXT_PUBLIC_SUPABASE_URL || !process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
@@ -43,18 +43,23 @@ export async function POST(request: Request) {
     )
     
     // Verify user is authenticated and has appropriate role
-    const { data: { session } } = await supabase.auth.getSession()
-    if (!session) {
-      console.log('API: No session found')
+    const { data: { user }, error: authError } = await supabase.auth.getUser()
+    if (authError || !user) {
+      console.log('API: No authenticated user found')
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
     // Get current user's role and organization
-    const { data: currentUser } = await supabase
+    const { data: currentUser, error: userError } = await supabase
       .from('users')
       .select('role, organization_id')
-      .eq('id', session.user.id)
+      .eq('id', user.id)
       .single()
+
+    if (userError) {
+      console.error('API: Error fetching current user:', userError)
+      return NextResponse.json({ error: 'Error fetching user data' }, { status: 500 })
+    }
 
     if (!currentUser) {
       console.log('API: User not found')
@@ -98,40 +103,45 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Forbidden - Cannot create users in different organizations' }, { status: 403 })
     }
 
-    const insertData = {
-      id: userData.id,
-      first_name: userData.first_name,
-      last_name: userData.last_name,
-      email: userData.email === '' ? null : userData.email,
-      phone: userData.phone,
-      position: userData.position,
-      role: userData.role,
-      status: userData.status,
-      company_id: userData.company_id || null,
-      owner_id: userData.owner_id || (currentUser.role === 'agent' ? session.user.id : null),
-      organization_id: userData.organization_id,
-      notes: userData.notes,
-      created_at: userData.created_at || new Date().toISOString(),
-      created_by: session.user.id
-    }
-
-    console.log('API: Attempting to create user with data:', insertData)
-
     // Check if user already exists
-    const { data: existingUser } = await supabase
-      .from('users')
-      .select('id')
-      .eq('email', userData.email)
-      .single()
+    if (userData.email) {
+      const { data: existingUser, error: existingUserError } = await supabase
+        .from('users')
+        .select('id')
+        .eq('email', userData.email)
+        .maybeSingle()
 
-    if (existingUser) {
-      return NextResponse.json({ error: 'User already exists' }, { status: 400 })
+      if (existingUserError && existingUserError.code !== 'PGRST116') {
+        console.error('API: Error checking existing user:', existingUserError)
+        return NextResponse.json({ error: 'Error checking for existing user' }, { status: 500 })
+      }
+
+      if (existingUser) {
+        console.log('API: User already exists with email:', userData.email)
+        return NextResponse.json({ error: 'User already exists' }, { status: 400 })
+      }
     }
 
-    let userId = userData.id
+    // Validate required fields based on role
+    if (userData.role === 'lead') {
+      if (!userData.lead_type) {
+        console.log('API: Missing required field for lead:', { lead_type: userData.lead_type })
+        return NextResponse.json({ error: 'Lead type is required for lead users' }, { status: 400 })
+      }
+    }
+
+    let userId: string | undefined
 
     // Only create auth user for roles that need authentication
     if (['agent', 'admin', 'super_admin'].includes(userData.role)) {
+      if (!userData.email || !userData.password) {
+        console.log('API: Missing required fields for agent/admin:', { 
+          email: !!userData.email, 
+          password: !!userData.password 
+        })
+        return NextResponse.json({ error: 'Email and password are required for agent/admin users' }, { status: 400 })
+      }
+
       // Create auth user
       const { data: authData, error: authError } = await supabase.auth.admin.createUser({
         email: userData.email,
@@ -147,6 +157,28 @@ export async function POST(request: Request) {
       userId = authData.user.id
     }
 
+    const insertData = {
+      first_name: userData.first_name,
+      last_name: userData.last_name,
+      email: userData.email === '' ? null : userData.email,
+      phone: userData.phone,
+      position: userData.position,
+      role: userData.role,
+      status: userData.status,
+      company_id: userData.company_id || null,
+      owner_id: userData.owner_id || (currentUser.role === 'agent' ? user.id : null),
+      organization_id: userData.organization_id,
+      notes: userData.notes,
+      created_at: userData.created_at || new Date().toISOString(),
+      created_by: user.id,
+      lead_type: userData.lead_type,
+      linkedin: userData.linkedin,
+      lead_source: userData.lead_source,
+      referrer_id: userData.referral_company_id
+    }
+
+    console.log('API: Attempting to create user with data:', insertData)
+
     // Insert user into database
     const { data: createdUser, error: insertError } = await supabase
       .from('users')
@@ -160,7 +192,7 @@ export async function POST(request: Request) {
     if (insertError) {
       console.error('API: Error inserting user:', insertError)
       // If insert fails and we created an auth user, delete it
-      if (['agent', 'admin', 'super_admin'].includes(userData.role)) {
+      if (userId) {
         await supabase.auth.admin.deleteUser(userId)
       }
       return NextResponse.json({ error: insertError.message }, { status: 500 })
@@ -172,7 +204,7 @@ export async function POST(request: Request) {
       const followUpsToCreate = followUpDates.map(date => ({
         date: date.toISOString(),
         type: 'email',
-        user_id: userId,
+        user_id: createdUser.id,
         completed_at: null,
         next_follow_up_id: null
       }))
@@ -185,8 +217,7 @@ export async function POST(request: Request) {
 
       if (followUpError) {
         console.error('API: Error creating follow-ups:', followUpError)
-        // Don't return error here, just log it - we still want to return the created user
-      } else {
+      } else if (newFollowUps && newFollowUps.length > 1) {
         // Update next_follow_up_id links
         for (let i = 0; i < newFollowUps.length - 1; i++) {
           await supabaseAdmin
@@ -197,9 +228,8 @@ export async function POST(request: Request) {
       }
     }
 
-    // Copy headers from response to the final response
-    const finalResponse = NextResponse.json(createdUser)
-    return copyResponseHeaders(response, finalResponse)
+    // Return the created user
+    return NextResponse.json(createdUser)
   } catch (error) {
     console.error('API: Unexpected error:', error)
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
