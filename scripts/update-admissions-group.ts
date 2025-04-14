@@ -9,7 +9,7 @@ async function updateAdmissionsGroup() {
   try {
     const { data, error } = await supabase
       .from('user_groups')
-      .update({ twilio_number: '+18335737276' })
+      .update({ twilio_phone: '+18335737276' })
       .eq('name', 'admissions')
       .select();
 

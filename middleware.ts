@@ -9,20 +9,6 @@ export async function middleware(request: NextRequest) {
     },
   })
 
-  // Add CORS headers for API routes
-  if (request.nextUrl.pathname.startsWith('/api/')) {
-    response.headers.set('Access-Control-Allow-Origin', '*')
-    response.headers.set('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS')
-    response.headers.set('Access-Control-Allow-Headers', '*')
-    response.headers.set('Access-Control-Max-Age', '86400')
-  }
-
-  // Allow Twilio webhook endpoints to bypass authentication
-  if (request.nextUrl.pathname.startsWith('/api/twiml/') || 
-      request.nextUrl.pathname.startsWith('/api/twilio/')) {
-    return response
-  }
-
   // Create supabase server client
   const supabase = createServerClient<Database>(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -50,20 +36,39 @@ export async function middleware(request: NextRequest) {
     }
   )
 
-  // Refresh session if it exists
-  const { data: { session }, error } = await supabase.auth.getSession()
-  
-  if (error) {
-    console.error('Middleware - Session error:', error)
+  // Handle CORS for API routes
+  if (request.nextUrl.pathname.startsWith('/api/')) {
+    const origin = request.headers.get('origin') || '*'
+    
+    // Add CORS headers
+    response.headers.set('Access-Control-Allow-Origin', origin)
+    response.headers.set('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS')
+    response.headers.set('Access-Control-Allow-Headers', 'Content-Type, Authorization')
+    response.headers.set('Access-Control-Allow-Credentials', 'true')
+    response.headers.set('Access-Control-Max-Age', '86400')
+
+    // Handle preflight requests
+    if (request.method === 'OPTIONS') {
+      return new NextResponse(null, {
+        status: 204,
+        headers: response.headers
+      })
+    }
   }
 
-  // Debug logging
-  console.log('Middleware - Session:', session ? `exists (${session.user.email})` : 'none')
+  // Allow specific Twilio webhook endpoints to bypass authentication
+  if (request.nextUrl.pathname.startsWith('/api/twiml/') || 
+      request.nextUrl.pathname === '/api/twilio/status' ||
+      request.nextUrl.pathname === '/api/twilio/token') {
+    return response
+  }
+
+  // Get the session
+  const { data: { session } } = await supabase.auth.getSession()
 
   // If user is not signed in and the current path is not /login,
   // redirect the user to /login
   if (!session && !request.nextUrl.pathname.startsWith('/login')) {
-    console.log('Middleware - No session, redirecting to login')
     const redirectUrl = request.nextUrl.clone()
     redirectUrl.pathname = '/login'
     redirectUrl.searchParams.set('redirectedFrom', request.nextUrl.pathname)
@@ -72,7 +77,6 @@ export async function middleware(request: NextRequest) {
 
   // If user is signed in and trying to access /login, redirect to home
   if (session && request.nextUrl.pathname.startsWith('/login')) {
-    console.log('Middleware - User is signed in, redirecting to home')
     return NextResponse.redirect(new URL('/', request.url))
   }
 

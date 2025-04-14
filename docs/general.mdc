@@ -3,4 +3,207 @@ description:
 globs: 
 alwaysApply: true
 ---
- 
+# General Documentation
+
+## Overview
+This document provides general information about the CRM system, its architecture, and key concepts.
+
+## Project Structure
+- `app/` - Next.js application routes and pages
+- `components/` - Reusable React components
+- `lib/` - Utility functions and shared logic
+- `supabase/` - Supabase configuration and database types
+- `types/` - TypeScript type definitions
+- `public/` - Static assets
+
+## Tech Stack
+- Next.js
+- React
+- TypeScript
+- Supabase
+- Tailwind CSS
+
+## Coding Standards
+
+### TypeScript Usage
+- All frontend components MUST be written in TypeScript
+- Use strict type checking
+- Define interfaces for all props and state
+- Avoid using `any` type unless absolutely necessary
+- Leverage TypeScript's type inference where possible
+
+### Code Organization
+- Follow the DRY (Don't Repeat Yourself) principle
+- Before creating new files, components, or functions:
+  1. Search the codebase for existing implementations:
+     ```typescript
+     // Use grep_search for exact matches
+     grep_search("functionName")
+     
+     // Use codebase_search for semantic matches
+     codebase_search("function description or purpose")
+     ```
+  2. If a function exists:
+     - Review its current implementation
+     - Check where and how it's being used
+     - Identify any potential scope or access issues
+     - Look for related functions or dependencies
+  3. Only create new if:
+     - A thorough search confirms it doesn't exist
+     - The existing implementation cannot be adapted
+     - The new function serves a distinct purpose
+  4. When modifying existing functions:
+     - Ensure changes don't break existing usage
+     - Document any changes to behavior or interface
+     - Consider scope and accessibility
+     - Check for naming conflicts
+- Keep files focused and single-purpose
+- Use meaningful file and folder names that reflect their content
+- Before implementing new features or processes:
+- Keep files focused and single-purpose
+- Use meaningful file and folder names that reflect their content
+- Before implementing new features or processes:
+  1. Search the codebase for existing solutions
+  2. Look for similar patterns or components that can be adapted
+  3. Check for existing authentication, routing, or data handling patterns
+  4. Example: Before creating a new user details page, search for existing user profile or detail views that could be reused
+  5. Example: Before implementing a new auth solution, check for existing authentication patterns or middleware
+
+### Documentation and Comments
+- Add concise comments for complex logic
+- Document non-obvious business rules
+- Include JSDoc comments for public functions and components
+- Keep comments up-to-date with code changes
+- Use self-documenting code where possible
+
+### Code Quality
+- Prioritize readability and maintainability
+- Use consistent formatting (prettier)
+- Follow ESLint rules
+- Write meaningful variable and function names
+- Break down complex functions into smaller, focused ones
+- Use early returns to reduce nesting
+- Handle edge cases explicitly
+- Ensure function and variable names are clear and descriptive
+- Use verbs for functions (e.g., `getUserData`, `handleSubmit`)
+- Use nouns for variables (e.g., `userProfile`, `isLoading`)
+- Avoid abbreviations unless widely understood
+- Use camelCase for variables and functions
+- Use PascalCase for components and types
+
+### Component Guidelines
+- Keep components small and focused
+- Use composition over inheritance
+- Implement proper prop types
+- Handle loading and error states
+- Follow React best practices and hooks guidelines
+
+### State Management
+- Use appropriate state management solutions
+- Keep state as local as possible
+- Document state dependencies
+- Handle state updates atomically
+
+### Performance
+- Optimize bundle size
+- Implement proper code splitting
+- Use React.memo() when beneficial
+- Optimize re-renders
+- Implement proper loading states
+
+## Getting Started
+1. Clone the repository
+2. Install dependencies
+3. Set up environment variables
+4. Run the development server
+
+## Environment Variables
+See `.env.example` for required environment variables.
+
+## Contributing Guidelines
+1. Follow the coding standards above
+2. Write tests for new features
+3. Update documentation as needed
+4. Create focused, single-purpose commits
+5. Review your own code before submitting PRs
+
+## Deployment
+[To be added]
+
+## Architectural Decisions
+
+### Authentication
+- **Current Solution**: Supabase Auth
+  - Location: `lib/supabase.ts`
+  - Implementation: Using Supabase's client-side authentication
+  - Key Features:
+    - Session management
+    - User authentication
+    - Protected routes via middleware
+  - Related Files:
+    - `middleware.ts` - Handles route protection
+    - `lib/supabase.ts` - Client configuration
+    - `app/auth/` - Authentication pages and components
+
+### Voice Integration
+- **Current Solution**: Twilio Voice
+  - Location: `services/voice.service.ts`
+  - Implementation: Custom VoiceService class for handling phone calls
+  - Key Features:
+    - Incoming/outgoing call handling
+    - Call status management
+    - Device initialization
+  - Related Files:
+    - `components/phone/phone-hud.tsx` - UI for phone functionality
+    - `services/voice.service.ts` - Core voice service implementation
+
+### State Management
+- **Current Solution**: React Context + Local State
+  - Implementation: Using React's built-in state management
+  - Key Features:
+    - Component-level state with useState
+    - Shared state with Context API
+  - Related Files:
+    - Various components using useState/useContext
+
+### Database
+- **Current Solution**: Supabase PostgreSQL
+  - Implementation: Direct Supabase client usage
+  - Key Features:
+    - Real-time subscriptions
+    - Row-level security
+    - Automatic API generation
+  - Related Files:
+    - `lib/supabase.ts` - Database client configuration
+    - `supabase/` - Database migrations and types
+
+### UI Framework
+- **Current Solution**: Next.js + Tailwind CSS
+  - Implementation: Modern React framework with utility-first CSS
+  - Key Features:
+    - Server-side rendering
+    - Static site generation
+    - Component-based architecture
+  - Related Files:
+    - `components/` - Reusable UI components
+    - `app/` - Page components and routing
+    - `tailwind.config.ts` - Tailwind configuration
+
+### Adding New Decisions
+When making significant architectural decisions or implementing new patterns:
+
+1. Document the decision in this section
+2. Include:
+   - The chosen solution
+   - Location of implementation
+   - Key features
+   - Related files
+   - Reasoning for the choice
+3. Update this section whenever:
+   - Adding new major features
+   - Changing existing patterns
+   - Implementing new services
+   - Modifying core architecture 
+
+
+   

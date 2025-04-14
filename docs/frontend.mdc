@@ -1,6 +1,40 @@
 ---
 description: 
-globs: 
+globs: **/*.{tsx,ts}", "!**/*.test.{tsx,ts}", "!**/*.spec.{tsx,ts}
+alwaysApply: false
+---
+---
+description: Frontend development standards and patterns
+globs: ["**/*.{tsx,ts}", "!**/*.test.{tsx,ts}", "!**/*.spec.{tsx,ts}"]
 alwaysApply: true
 ---
- 
+# Frontend Documentation
+
+## Component Structure
+
+### Layout Components
+- Located in `components/layout/`
+- Handle page structure and common UI elements
+- Examples:
+  - `MainLayout` - Primary application layout
+  - `DashboardLayout` - Layout for dashboard pages
+  - `AuthLayout` - Layout for authentication pages
+
+### Page Components
+- Located in `app/` directory
+- Follow Next.js 13+ app directory structure
+- Each page should:
+  - Handle its own data fetching
+  - Manage its own loading states
+  - Implement proper error boundaries
+  - Use appropriate layout components
+
+### Shared UI Components
+- Located in `components/ui/`
+- Reusable, atomic components
+- Follow shadcn/ui patterns
+- Examples:
+  - `Button`
+  - `Input`
+  - `Dialog`
+  - `Table`

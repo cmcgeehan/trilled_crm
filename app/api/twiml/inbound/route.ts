@@ -99,6 +99,7 @@ export async function POST(request: Request) {
         answerOnBridge: true,
         callerId: fromNumber,
         timeout: 30,
+        record: 'record-from-answer',
         action: `/api/twiml/status?fromNumber=${encodeURIComponent(fromNumber)}`,
         method: 'POST'
       });
@@ -114,6 +115,22 @@ export async function POST(request: Request) {
       const twimlResponse = twiml.toString();
       console.log('Generated TwiML:', twimlResponse);
       
+      // Create call record for direct user
+      const { error: callError } = await supabase
+        .from('calls')
+        .insert({
+          call_sid: formData.get('CallSid') as string,
+          from_number: fromNumber,
+          to_number: calledNumber,
+          to_user_id: directUser.id,
+          status: 'initiated',
+          started_at: new Date().toISOString()
+        });
+
+      if (callError) {
+        console.error('Error creating call record:', callError);
+      }
+
       return new NextResponse(twimlResponse, {
         headers: {
           'Content-Type': 'text/xml; charset=utf-8',
@@ -199,8 +216,24 @@ export async function POST(request: Request) {
           },
         });
       }
-      
-      // Create a TwiML response
+
+      // Create call record for group call
+      const { error: callError } = await supabase
+        .from('calls')
+        .insert({
+          call_sid: formData.get('CallSid') as string,
+          from_number: fromNumber,
+          to_number: calledNumber,
+          group_id: group.id,
+          status: 'initiated',
+          started_at: new Date().toISOString()
+        });
+
+      if (callError) {
+        console.error('Error creating call record:', callError);
+      }
+
+      // Create TwiML response for group call
       const twiml = new VoiceResponse();
       
       // Add recording announcement
@@ -209,18 +242,18 @@ export async function POST(request: Request) {
         language: 'en-US'
       }, 'This call may be recorded for quality assurance purposes.');
       
-      // Create a dial sequence for VOIP clients
-      const dial = twiml.dial({
-        answerOnBridge: true,
-        callerId: fromNumber,
-        timeout: 30,
-        action: `/api/twiml/status?fromNumber=${encodeURIComponent(fromNumber)}`,
-        method: 'POST'
-      });
-      
-      // Add each available user's client with proper configuration
-      availableUserIds.forEach((userId: string) => {
-        console.log('Dialing user:', userId);
+      // Create a dial for each available user
+      availableUserIds.forEach(userId => {
+        const dial = twiml.dial({
+          answerOnBridge: true,
+          callerId: fromNumber,
+          timeout: 30,
+          record: 'record-from-answer',
+          action: `/api/twiml/status?fromNumber=${encodeURIComponent(fromNumber)}`,
+          method: 'POST'
+        });
+        
+        // Add the client with their ID as the identifier
         dial.client({
           statusCallbackEvent: ['initiated', 'ringing', 'answered', 'completed'],
           statusCallback: `/api/twiml/status?fromNumber=${encodeURIComponent(fromNumber)}`,
@@ -240,9 +273,9 @@ export async function POST(request: Request) {
     
     // If no group is found, play a message and hang up
     console.error('No group found for number:', calledNumber);
-    const twiml = new VoiceResponse();
-    twiml.say('We could not find the group you are trying to reach. Please try again later.');
-    return new NextResponse(twiml.toString(), {
+    const errorTwiml = new VoiceResponse();
+    errorTwiml.say('We could not find the group you are trying to reach. Please try again later.');
+    return new NextResponse(errorTwiml.toString(), {
       headers: {
         'Content-Type': 'text/xml; charset=utf-8',
         'Cache-Control': 'no-cache'

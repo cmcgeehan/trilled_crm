@@ -1,1 +1,381 @@
- 
+---
+description: Backend development standards and patterns
+globs: ["**/api/**/*.{ts,js}", "**/services/**/*.{ts,js}", "**/lib/**/*.{ts,js}"]
+alwaysApply: true
+---
+# Backend Documentation
+
+## API Structure
+
+### Route Handlers
+- Located in `app/api/`
+- Follow Next.js 13+ API route conventions
+- Implement proper error handling
+- Use appropriate HTTP methods
+- Example:
+```typescript
+export async function GET(req: Request) {
+  try {
+    const data = await fetchData();
+    return NextResponse.json(data);
+  } catch (error) {
+    return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
+  }
+}
+```
+
+### API Endpoints
+- Use RESTful conventions
+- Implement proper versioning
+- Document endpoints with OpenAPI/Swagger
+- Handle authentication and authorization
+- Example:
+```
+/api/v1/users
+/api/v1/users/:id
+/api/v1/users/:id/contacts
+```
+
+## Services
+
+### Service Layer
+- Located in `services/`
+- Handle business logic
+- Implement data validation
+- Manage external service integrations
+- Example:
+```typescript
+export class UserService {
+  async createUser(data: UserData) {
+    // Business logic
+    // Data validation
+    // Database operations
+  }
+}
+```
+
+### External Services
+- Twilio Voice Integration
+- Supabase Database
+- Email Service
+- File Storage
+- Example:
+```typescript
+export class VoiceService {
+  async initialize() {
+    // Twilio device setup
+  }
+  
+  async makeCall(number: string) {
+    // Call handling logic
+  }
+}
+```
+
+### Call Handling System
+The call handling system manages incoming calls to both individual users and groups. It uses Twilio for call routing and maintains call records in our database. The system follows a parent-child relationship model for group calls.
+
+#### Call Flow
+
+##### 1. Inbound Call Handling (`/api/twiml/inbound/route.ts`)
+When a call comes in, the system:
+1. Checks if the call is to a direct user number or a group number
+2. For group calls:
+   - Creates a parent call record with `is_parent_call: true`
+   - Sets initial status as 'ringing'
+   - Forwards the call to all available group members
+
+##### 2. Status Callback Handling (`/api/twiml/status/route.ts`)
+The system receives status updates for both parent and child calls:
+
+###### Status Updates
+- `initiated`/`ringing`: Updates the call record status
+- `answered`: 
+  - For parent calls: Updates status to 'answered'
+  - For child calls: Creates a new call record with `is_parent_call: false` and links to parent via `parent_call_sid`
+- `completed`:
+  - Updates call record with duration and recording details
+  - For child calls: Creates a communication record
+  - For parent calls: Only updates status
+
+#### Database Schema
+
+##### Calls Table
+```sql
+- id: UUID (primary key)
+- call_sid: string (unique)
+- parent_call_sid: string (nullable)
+- is_parent_call: boolean
+- status: string
+- user_id: UUID (nullable)
+- from_number: string
+- to_number: string
+- started_at: timestamp
+- duration: integer
+- recording_url: string (nullable)
+- recording_sid: string (nullable)
+- updated_at: timestamp
+```
+
+##### Communications Table
+```sql
+- id: UUID (primary key)
+- direction: string
+- to_address: string
+- from_address: string
+- delivered_at: timestamp
+- agent_id: UUID
+- user_id: UUID
+- content: string
+- communication_type: string
+- communication_type_id: UUID
+```
+
+#### Example Scenarios
+
+##### Direct Call to User
+1. Call comes in to user's direct number
+2. Single call record created
+3. Status updates tracked in same record
+4. Communication record created on completion
+
+##### Group Call
+1. Call comes in to group number
+2. Parent call record created (`is_parent_call: true`)
+3. Call forwarded to all group members
+4. When a member answers:
+   - Child call record created (`is_parent_call: false`)
+   - `parent_call_sid` set to parent's `call_sid`
+5. When call ends:
+   - Child call record updated with duration/recording
+   - Communication record created for child call
+   - Parent call status updated
+
+#### Important Notes
+- Only one call record is maintained per actual call
+- Parent calls represent the initial routing
+- Child calls represent the actual answered call
+- Communication records are only created for child calls
+- Recording URLs and durations are stored in child call records
+
+## Database
+
+### Supabase Integration
+- Use Supabase client for database operations
+- Implement proper error handling
+- Use TypeScript types for database models
+- Example:
+```typescript
+const { data, error } = await supabase
+  .from('users')
+  .select('*')
+  .eq('id', userId);
+```
+
+### Data Models
+- Define clear interfaces
+- Use proper typing
+- Implement validation
+- Example:
+```typescript
+interface User {
+  id: string;
+  email: string;
+  name: string;
+  created_at: string;
+}
+```
+
+## Authentication & Authorization
+
+### Supabase Auth
+- Use Supabase's authentication system
+- Implement proper session handling
+- Manage user roles and permissions
+- Example:
+```typescript
+const { data: { session }, error } = await supabase.auth.getSession();
+```
+
+### Middleware
+- Implement route protection
+- Handle authentication checks
+- Manage role-based access
+- Example:
+```typescript
+export async function middleware(req: NextRequest) {
+  // Authentication check
+  // Role verification
+  // Route protection
+}
+```
+
+## Error Handling
+
+### Error Types
+- Define custom error classes
+- Implement proper error messages
+- Use appropriate HTTP status codes
+- Example:
+```typescript
+class ApiError extends Error {
+  constructor(
+    public statusCode: number,
+    message: string
+  ) {
+    super(message);
+  }
+}
+```
+
+### Error Middleware
+- Centralize error handling
+- Log errors appropriately
+- Return consistent error responses
+- Example:
+```typescript
+export function errorHandler(err: Error, req: Request, res: Response) {
+  // Error logging
+  // Response formatting
+}
+```
+
+## Security
+
+### Data Validation
+- Use Zod for schema validation
+- Implement input sanitization
+- Handle SQL injection prevention
+- Example:
+```typescript
+const userSchema = z.object({
+  email: z.string().email(),
+  password: z.string().min(8),
+});
+```
+
+### Rate Limiting
+- Implement request throttling
+- Use appropriate limits
+- Handle rate limit responses
+- Example:
+```typescript
+const limiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 100
+});
+```
+
+## Testing
+
+### Unit Tests
+- Use Jest for testing
+- Mock external dependencies
+- Test business logic
+- Example:
+```typescript
+describe('UserService', () => {
+  it('should create a user', async () => {
+    // Test implementation
+  });
+});
+```
+
+### Integration Tests
+- Test API endpoints
+- Verify database operations
+- Check external service integration
+- Example:
+```typescript
+describe('Users API', () => {
+  it('should return user data', async () => {
+    // Test implementation
+  });
+});
+```
+
+## Logging
+
+### Logging Strategy
+- Use structured logging
+- Implement proper log levels
+- Include relevant context
+- Example:
+```typescript
+logger.info('User created', {
+  userId: user.id,
+  timestamp: new Date(),
+});
+```
+
+### Error Logging
+- Log errors with stack traces
+- Include request context
+- Implement error tracking
+- Example:
+```typescript
+logger.error('API Error', {
+  error: err,
+  requestId: req.id,
+});
+```
+
+## Performance
+
+### Caching
+- Implement appropriate caching
+- Use Redis for distributed caching
+- Handle cache invalidation
+- Example:
+```typescript
+const cachedData = await cache.get(key);
+if (!cachedData) {
+  const data = await fetchData();
+  await cache.set(key, data);
+}
+```
+
+### Optimization
+- Optimize database queries
+- Implement proper indexing
+- Use connection pooling
+- Example:
+```typescript
+const { data } = await supabase
+  .from('users')
+  .select('id, name')
+  .eq('status', 'active')
+  .limit(100);
+```
+
+## Best Practices
+
+### Code Organization
+- Follow SOLID principles
+- Implement proper separation of concerns
+- Use dependency injection
+- Example:
+```typescript
+class UserService {
+  constructor(
+    private db: Database,
+    private logger: Logger
+  ) {}
+}
+```
+
+### TypeScript Usage
+- Use strict type checking
+- Define clear interfaces
+- Implement proper type guards
+- Example:
+```typescript
+function isUser(data: unknown): data is User {
+  return (
+    typeof data === 'object' &&
+    data !== null &&
+    'id' in data &&
+    'email' in data
+  );
+}
+``` 
