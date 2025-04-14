@@ -25,7 +25,7 @@ interface IncomingCall extends BaseCall {
 interface ActiveCall extends BaseCall {
   disconnect: () => void;
   startTime: Date;
-  on?: (event: string, listener: (...args: any[]) => void) => void;
+  on?: (event: string, listener: (status: string) => void) => void;
   recordingUrl?: string;
 }
 
@@ -348,13 +348,18 @@ export function PhoneHUD() {
       console.log('Call duration:', duration);
 
       // First, check if a call record already exists for this call_sid
-      const { data: existingCall, error: findError } = await supabase
+      const { data: call, error } = await supabase
         .from('calls')
         .select('*')
         .eq('call_sid', callSid)
         .single();
 
-      if (existingCall) {
+      if (error) {
+        console.error('Error finding call:', error);
+        return;
+      }
+
+      if (call) {
         console.log('Call record already exists, skipping creation');
         return;
       }
