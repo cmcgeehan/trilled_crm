@@ -17,6 +17,22 @@ export async function POST(request: Request) {
     
     console.log('Call details:', { calledNumber, fromNumber });
     
+    // Find the user initiating the call
+    const { data: fromUser, error: fromUserError } = await supabase
+      .from('users')
+      .select('id')
+      .eq('phone', fromNumber) // Assuming 'phone' is the column storing user phone numbers
+      .maybeSingle();
+
+    if (fromUserError) {
+      console.error('Error finding initiating user:', fromUserError);
+      // Decide if we should proceed without from_user_id or return an error
+      // For now, we'll proceed but log the error.
+    }
+
+    const fromUserId = fromUser?.id || null;
+    console.log('Initiating User ID (fromUser.id):', fromUserId);
+    
     // First check if this is a direct call to a user
     const { data: directUser, error: userError } = await supabase
       .from('users')
@@ -100,7 +116,7 @@ export async function POST(request: Request) {
         callerId: fromNumber,
         timeout: 30,
         record: 'record-from-answer',
-        action: `/api/twiml/status?fromNumber=${encodeURIComponent(fromNumber)}`,
+        action: `/api/twilio/status?fromNumber=${encodeURIComponent(fromNumber)}`,
         method: 'POST'
       });
       
@@ -108,7 +124,7 @@ export async function POST(request: Request) {
       console.log('Dialing VOIP client for user:', directUser.id);
       dial.client({
         statusCallbackEvent: ['initiated', 'ringing', 'answered', 'completed'],
-        statusCallback: `/api/twiml/status?fromNumber=${encodeURIComponent(fromNumber)}`,
+        statusCallback: `/api/twilio/status?fromNumber=${encodeURIComponent(fromNumber)}`,
         statusCallbackMethod: 'POST'
       }, directUser.id);
       
@@ -122,6 +138,7 @@ export async function POST(request: Request) {
           call_sid: formData.get('CallSid') as string,
           from_number: fromNumber,
           to_number: calledNumber,
+          from_user_id: fromUserId,
           to_user_id: directUser.id,
           status: 'initiated',
           started_at: new Date().toISOString()
@@ -224,6 +241,7 @@ export async function POST(request: Request) {
           call_sid: formData.get('CallSid') as string,
           from_number: fromNumber,
           to_number: calledNumber,
+          from_user_id: fromUserId,
           group_id: group.id,
           status: 'initiated',
           started_at: new Date().toISOString()
@@ -242,28 +260,30 @@ export async function POST(request: Request) {
         language: 'en-US'
       }, 'This call may be recorded for quality assurance purposes.');
       
-      // Create a dial for each available user
+      // Create a SINGLE Dial verb to simultaneously ring all available users
+      const dial = twiml.dial({
+        answerOnBridge: true,
+        callerId: fromNumber,
+        timeout: 30,
+        record: 'record-from-answer',
+        action: `/api/twilio/status?fromNumber=${encodeURIComponent(fromNumber)}`,
+        method: 'POST'
+      });
+
+      // Add a <Client> noun inside the single <Dial> for each available user
       availableUserIds.forEach(userId => {
-        const dial = twiml.dial({
-          answerOnBridge: true,
-          callerId: fromNumber,
-          timeout: 30,
-          record: 'record-from-answer',
-          action: `/api/twiml/status?fromNumber=${encodeURIComponent(fromNumber)}`,
-          method: 'POST'
-        });
-        
-        // Add the client with their ID as the identifier
+        console.log('Adding client to dial:', userId);
         dial.client({
           statusCallbackEvent: ['initiated', 'ringing', 'answered', 'completed'],
-          statusCallback: `/api/twiml/status?fromNumber=${encodeURIComponent(fromNumber)}`,
+          statusCallback: `/api/twilio/status?fromNumber=${encodeURIComponent(fromNumber)}`,
           statusCallbackMethod: 'POST'
         }, userId);
       });
       
-      console.log('Generated TwiML:', twiml.toString());
+      const twimlResponse = twiml.toString();
+      console.log('Generated TwiML:', twimlResponse);
       
-      return new NextResponse(twiml.toString(), {
+      return new NextResponse(twimlResponse, {
         headers: {
           'Content-Type': 'text/xml; charset=utf-8',
           'Cache-Control': 'no-cache'
