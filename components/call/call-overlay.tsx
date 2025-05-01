@@ -2,7 +2,13 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { PhoneIncoming, PhoneOutgoing } from "lucide-react";
 import { Input } from "@/components/ui/input";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import dynamic from 'next/dynamic';
+
+const DynamicDialog = dynamic(
+  () => import('@/components/ui/dialog').then((mod) => mod.Dialog),
+  { ssr: false }
+);
 
 interface CallOverlayProps {
   isOpen: boolean;
@@ -64,7 +70,7 @@ export function CallOverlay({ isOpen, onClose }: CallOverlayProps) {
   };
 
   return (
-    <Dialog open={isOpen} onOpenChange={onClose}>
+    <DynamicDialog open={isOpen} onOpenChange={onClose}>
       <DialogContent className="sm:max-w-[425px]">
         <DialogHeader>
           <DialogTitle>Phone Calls</DialogTitle>
@@ -121,6 +127,6 @@ export function CallOverlay({ isOpen, onClose }: CallOverlayProps) {
           </div>
         </div>
       </DialogContent>
-    </Dialog>
+    </DynamicDialog>
   );
 } 

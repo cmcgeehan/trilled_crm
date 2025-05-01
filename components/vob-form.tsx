@@ -573,27 +573,27 @@ export function VOBForm({ userId }: VOBFormProps) {
                         <h4 className="font-semibold">Coverage Types</h4>
                         <div className="grid grid-cols-2 gap-4 text-sm">
                           <div className="flex items-center space-x-2">
-                            <Checkbox checked={record.deductible_applies_to_oop} disabled />
+                            <Checkbox checked={record.deductible_applies_to_oop ?? false} disabled />
                             <Label>Deductible Applies to OOP</Label>
                           </div>
                           <div className="flex items-center space-x-2">
-                            <Checkbox checked={record.cross_accumulate} disabled />
+                            <Checkbox checked={record.cross_accumulate ?? false} disabled />
                             <Label>Cross Accumulate</Label>
                           </div>
                           <div className="flex items-center space-x-2">
-                            <Checkbox checked={record.op_coverage} disabled />
+                            <Checkbox checked={record.op_coverage ?? false} disabled />
                             <Label>OP Coverage</Label>
                           </div>
                           <div className="flex items-center space-x-2">
-                            <Checkbox checked={record.iop_coverage} disabled />
+                            <Checkbox checked={record.iop_coverage ?? false} disabled />
                             <Label>IOP Coverage</Label>
                           </div>
                           <div className="flex items-center space-x-2">
-                            <Checkbox checked={record.telehealth_coverage} disabled />
+                            <Checkbox checked={record.telehealth_coverage ?? false} disabled />
                             <Label>Telehealth Coverage</Label>
                           </div>
                           <div className="flex items-center space-x-2">
-                            <Checkbox checked={record.multi_plan} disabled />
+                            <Checkbox checked={record.multi_plan ?? false} disabled />
                             <Label>Multi Plan</Label>
                           </div>
                         </div>

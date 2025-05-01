@@ -90,14 +90,22 @@ export function MessageTemplatesDialog({ trigger, onInsert }: MessageTemplatesDi
       return
     }
 
+    // Add null check for required organization_id
+    if (!userOrg.organization_id) {
+      toast.error("Cannot save template: Organization information is missing.");
+      return; // Prevent insertion if organization ID is null
+    }
+
     const { error } = await supabase
       .from('message_templates')
-      .insert({
+      // Wrap the insert object in an array
+      .insert([{
         name: newTemplate.name,
         content: newTemplate.content,
         created_by: session.user.id,
-        organization_id: userOrg.organization_id,
-      })
+        // Pass the validated, non-null organization ID
+        organization_id: userOrg.organization_id 
+      }])
 
     if (error) {
       console.error('Error creating template:', error)

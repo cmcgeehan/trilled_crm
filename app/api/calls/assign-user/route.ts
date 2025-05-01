@@ -35,8 +35,8 @@ export async function POST(request: Request) {
     let body: AssignUserRequestBody;
     try {
       body = await request.json();
-    } catch (e: unknown) {
-      console.warn('[/api/calls/assign-user] Invalid JSON body:', e instanceof Error ? e.message : e);
+    } catch (parseError) {
+      console.warn('[/api/calls/assign-user] Invalid JSON body:', parseError);
       return NextResponse.json({ error: 'Invalid request body' }, { status: 400 });
     }
 
@@ -73,7 +73,8 @@ export async function POST(request: Request) {
     return NextResponse.json({ message: 'User assigned successfully' }, { status: 200 });
 
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'An unknown error occurred';
+    // Type guard or assertion if accessing specific properties
+    const message = error instanceof Error ? error.message : String(error);
     console.error('[/api/calls/assign-user] Unexpected error:', message);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }

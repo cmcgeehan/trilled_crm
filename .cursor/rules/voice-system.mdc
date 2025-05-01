@@ -1,0 +1,186 @@
+---
+description: 
+globs: components/phone/**/*,services/voice.service.ts,lib/voice-service.ts,app/api/twiml/**/*
+alwaysApply: false
+---
+ ---
+description: Rules and guidelines for working with the voice system in our CRM
+globs: 
+  - "components/phone/**/*"
+  - "services/voice.service.ts"
+  - "lib/voice-service.ts"
+  - "app/api/twiml/**/*"
+alwaysApply: true
+---
+# Voice System Rules
+
+## Project Structure
+
+### Core Components
+- `components/phone/phone-hud.tsx`: Main phone interface component
+- `services/voice.service.ts`: Voice service implementation
+- `lib/voice-service.ts`: Voice service utilities
+- `components/TwilioClient.tsx`: Twilio client component
+
+### API Routes
+- `app/api/twiml/inbound/route.ts`: Handles incoming calls
+- `app/api/twiml/outbound/route.ts`: Handles outgoing calls
+- `app/api/twiml/status/route.ts`: Handles call status updates
+- `app/api/twiml/handle-input/route.ts`: Handles DTMF input
+- `app/api/twiml/handle-recording/route.ts`: Handles call recordings
+
+### Database Schema
+- `calls` table: Stores call records
+  - `call_sid`: Unique Twilio call identifier
+  - `parent_call_sid`: For child calls in group routing
+  - `from_user_id`: User who initiated the call
+  - `to_user_id`: User who answered the call
+  - `status`: Current call status
+  - `recording_url`: URL of call recording (if available)
+  - `duration`: Call duration in seconds
+  - `start_time`: Call start timestamp
+  - `end_time`: Call end timestamp
+
+## Implementation Guidelines
+
+### Call Record Management
+```typescript
+// Good example: Checking for existing call record
+const { data: existingCall } = await supabase
+  .from('calls')
+  .select('*')
+  .eq('call_sid', callSid)
+  .single();
+
+if (existingCall) {
+  // Update existing record
+  await supabase
+    .from('calls')
+    .update({ status, updated_at: new Date() })
+    .eq('call_sid', callSid);
+} else {
+  // Create new record
+  await supabase
+    .from('calls')
+    .insert({
+      call_sid: callSid,
+      status,
+      start_time: new Date()
+    });
+}
+
+// Bad example: Creating duplicate records
+await supabase
+  .from('calls')
+  .insert({
+    call_sid: callSid,
+    status,
+    start_time: new Date()
+  });
+```
+
+### User Identification
+```typescript
+// Good example: Looking up user from phone number
+const normalizedNumber = phoneNumber.replace(/\D/g, '');
+const { data: user } = await supabase
+  .from('users')
+  .select('id')
+  .eq('phone', normalizedNumber)
+  .single();
+
+// Bad example: Not normalizing phone numbers
+const { data: user } = await supabase
+  .from('users')
+  .select('id')
+  .eq('phone', phoneNumber)
+  .single();
+```
+
+### Status Updates
+```typescript
+// Good example: Handling status updates
+if (status === 'answered') {
+  // Look up user from client identifier
+  const { data: user } = await supabase
+    .from('users')
+    .select('id')
+    .eq('twilio_client_identifier', client)
+    .single();
+
+  // Update call with answering user
+  await supabase
+    .from('calls')
+    .update({ 
+      to_user_id: user?.id,
+      status: 'answered',
+      updated_at: new Date()
+    })
+    .eq('call_sid', callSid);
+}
+
+// Bad example: Not updating user IDs
+await supabase
+  .from('calls')
+  .update({ status: 'answered' })
+  .eq('call_sid', callSid);
+```
+
+## Common Pitfalls
+
+1. Creating duplicate call records
+   - Always check for existing records before creating new ones
+   - Use `call_sid` as the unique identifier
+
+2. Missing status updates
+   - Handle all Twilio status callbacks
+   - Update call records in real-time
+
+3. Incorrect user identification
+   - Normalize phone numbers before lookups
+   - Store both phone numbers and user IDs
+
+4. Improper error handling
+   - Log all errors with context
+   - Implement proper cleanup
+
+5. Inconsistent state management
+   - Maintain parent-child call relationships
+   - Update all related records
+
+## Testing Requirements
+
+1. Test direct calls
+   - Verify user identification
+   - Check call record creation
+   - Validate status updates
+
+2. Test group calls
+   - Verify parent-child relationships
+   - Check routing logic
+   - Validate recording handling
+
+3. Test error scenarios
+   - Missing user records
+   - Failed lookups
+   - Network issues
+
+## Environment Variables
+
+Required variables:
+```env
+NEXT_PUBLIC_SUPABASE_URL=
+NEXT_PUBLIC_SUPABASE_ANON_KEY=
+TWILIO_ACCOUNT_SID=
+TWILIO_AUTH_TOKEN=
+TWILIO_API_KEY=
+TWILIO_API_SECRET=
+```
+
+## Deployment Checklist
+
+1. Verify environment variables
+2. Check Twilio webhook URLs
+3. Validate database migrations
+4. Test in staging environment
+5. Monitor error logs

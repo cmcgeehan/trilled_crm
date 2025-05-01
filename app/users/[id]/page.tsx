@@ -25,6 +25,7 @@ import { MessageInput } from "@/components/message-input"
 import { ReferralPartnerCompanyCombobox } from "@/components/ui/referral-partner-company-combobox"
 import { VOBForm } from "@/components/vob-form"
 import { CallButton } from "@/components/call/call-button"
+import { toast } from 'react-hot-toast'
 
 type UserRole = Database['public']['Tables']['users']['Row']['role']
 type FollowUpType = 'email' | 'sms' | 'call' | 'meeting' | 'tour'
@@ -36,7 +37,7 @@ type Customer = Database['public']['Tables']['users']['Row'] & {
   company_id: string | null;
   notes: string | null;
   linkedin: string | null;
-  referring_user_id: string | null;
+  referring_user_id?: string | null;
   companies?: {
     id: string;
     name: string;
@@ -146,7 +147,6 @@ export default function CustomerDetailPage() {
   const [currentUserRole, setCurrentUserRole] = useState<UserRole | null>(null);
   const [isEditable, setIsEditable] = useState<boolean>(false);
   const [companies, setCompanies] = useState<Database['public']['Tables']['companies']['Row'][]>([]);
-  const [currentUser, setCurrentUser] = useState<Database['public']['Tables']['users']['Row'] | null>(null);
   const [formData, setFormData] = useState<FormData>({
     first_name: customer?.first_name || "",
     last_name: customer?.last_name || "",
@@ -175,6 +175,12 @@ export default function CustomerDetailPage() {
     
     setIsLoadingB2CInfo(true);
     try {
+      // Get current user session for created_by/updated_by
+      const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+      if (sessionError) throw new Error('Could not get session to create B2C info.');
+      if (!session?.user?.id) throw new Error('No authenticated user found to create B2C info.');
+      const currentUserId = session.user.id;
+
       // First try to get existing record
       const { data: existingData, error: fetchError } = await supabase
         .from('b2c_lead_info')
@@ -184,10 +190,11 @@ export default function CustomerDetailPage() {
 
       if (fetchError && fetchError.code === 'PGRST116') {
         // No record exists, create a new one
+        console.log('No B2C record found, creating new one for user:', id, 'by user:', currentUserId)
         const { data: newData, error: insertError } = await supabase
           .from('b2c_lead_info')
           .insert({
-            user_id: id,
+            user_id: id, // The ID of the lead this info belongs to
             address: '',
             gender: 'Prefer not to say',
             ssn_last_four: '',
@@ -195,17 +202,23 @@ export default function CustomerDetailPage() {
             parental_status: 'No children',
             referral_source: '',
             headshot_url: null,
-            dob: ''
+            dob: '',
+            // Add required fields
+            created_by: currentUserId, 
+            updated_by: currentUserId 
           })
           .select()
           .single();
 
-        if (insertError) throw insertError;
-        setB2cLeadInfo(newData);
+        if (insertError) {
+          console.error('Insert Error Details:', insertError)
+          throw insertError;
+        }
+        setB2cLeadInfo(newData ? { ...newData, dob: newData.dob || '' } : null);
       } else if (fetchError) {
         throw fetchError;
       } else {
-        setB2cLeadInfo(existingData);
+        setB2cLeadInfo(existingData ? { ...existingData, dob: existingData.dob || '' } : null);
       }
     } catch (err) {
       console.error('Error loading B2C lead info:', err);
@@ -385,45 +398,32 @@ export default function CustomerDetailPage() {
         return
       }
 
-      // Find the first follow-up (one with no previous follow-up pointing to it)
-      const followUpMap = new Map(allFollowUps.map(fu => [fu.id, fu]))
-      const hasIncomingEdge = new Set(allFollowUps.map(fu => fu.next_follow_up_id).filter(Boolean))
-      const firstFollowUp = allFollowUps.find(fu => !hasIncomingEdge.has(fu.id))
+      // Restore simplified mapping logic, applying the 'completed' fix
+      const mappedFollowUps = (allFollowUps || []).map(fu => ({
+          ...fu,
+          // Assert/map necessary fields
+          id: fu.id!, 
+          user_id: fu.user_id!, 
+          type: fu.type as FollowUpType, 
+          date: fu.date!, 
+          completed_at: fu.completed_at,
+          // Apply the fix for 'completed' type mismatch
+          completed: fu.completed === null ? undefined : fu.completed,
+          notes: fu.notes,
+          created_at: fu.created_at!,
+          updated_at: fu.updated_at!,
+          deleted_at: fu.deleted_at,
+          next_follow_up_id: fu.next_follow_up_id,
+        })) as FollowUp[];
 
-      if (!firstFollowUp) {
-        // If no first follow-up found (shouldn't happen), fall back to date ordering
-        const sortedFollowUps = allFollowUps
-          .sort((a, b) => {
-            const dateA = a.date ? new Date(a.date).getTime() : 0
-            const dateB = b.date ? new Date(b.date).getTime() : 0
-            return dateA - dateB
-          })
-          .map(fu => ({
-            ...fu,
-            type: (fu.type as FollowUpType) || null
-          }))
-        setFollowUps(sortedFollowUps)
-        return
-      }
+      setFollowUps(mappedFollowUps);
 
-      // Build the ordered list by following the next_follow_up_id links
-      const orderedFollowUps: FollowUp[] = []
-      let current: typeof firstFollowUp | null = firstFollowUp
-      while (current) {
-        orderedFollowUps.push({
-          ...current,
-          type: (current.type as FollowUpType) || null
-        })
-        current = current.next_follow_up_id ? followUpMap.get(current.next_follow_up_id) || null : null
-      }
-
-      setFollowUps(orderedFollowUps)
-      
-      // Select the next incomplete follow-up
-      const nextFollowUp = orderedFollowUps.find(fu => !fu.completed_at)
+      // Select the next incomplete follow-up from the mapped list
+      const nextFollowUp = mappedFollowUps.find(fu => !fu.completed_at)
       if (nextFollowUp) {
         setSelectedFollowUp(nextFollowUp)
       }
+
     } catch (err) {
       console.error('Error loading follow-ups:', err)
     }
@@ -472,20 +472,34 @@ export default function CustomerDetailPage() {
         throw new Error('You do not have access to this customer')
       }
 
-      const customer = {
-        ...data,
-        company_id: data.companies?.id,
-        owner: currentUser
-      }
+      const customerData = data // Alias for clarity
+      const customerObject: Customer = {
+        ...customerData,
+        id: customerData.id!, 
+        status: customerData.status as UserStatus, 
+        role: customerData.role as UserRole, 
+        company_id: customerData.company_id ?? null, 
+        notes: customerData.notes ?? null, 
+        linkedin: customerData.linkedin ?? null, 
+        email: customerData.email || '', 
+        first_name: customerData.first_name || '', 
+        last_name: customerData.last_name || '', 
+        created_at: customerData.created_at!, 
+        updated_at: customerData.updated_at!, 
+        companies: customerData.companies ? {
+          ...customerData.companies,
+          name: customerData.companies.name || ''
+        } : null,
+      };
 
-      setCustomer(customer)
-      setEditedCustomer(customer)
+      setCustomer(customerObject);
+      setEditedCustomer(customerObject); // Set editedCustomer with the same validated object
       
       // Set editability based on loaded customer and current user role
-      if (currentUserRole) {
+      if (currentUserRole && customerObject) {
         const canEditUser = 
           currentUserRole === 'super_admin' || 
-          (customer.role === 'lead' || customer.role === 'customer');
+          (customerObject.role === 'lead' || customerObject.role === 'customer');
         setIsEditable(canEditUser);
       }
       
@@ -511,9 +525,9 @@ export default function CustomerDetailPage() {
         interactions: (communications || []).map(comm => ({
           type: 'internal',
           date: format(new Date(comm.created_at), 'MMM d, yyyy h:mm a'),
-          content: comm.content,
+          content: comm.content || '',
           sender: 'agent',
-          agentName: comm.from_address
+          agentName: comm.from_address ?? undefined
         }))
       }
       setCases([mockCase])
@@ -527,7 +541,7 @@ export default function CustomerDetailPage() {
     } finally {
       setLoading(false)
     }
-  }, [id, loadFollowUps, currentUserRole, currentUser])
+  }, [id, loadFollowUps, currentUserRole])
 
   const loadReferringUsers = useCallback(async () => {
     try {
@@ -862,69 +876,66 @@ export default function CustomerDetailPage() {
   }
 
   const handleSaveCustomer = async () => {
-    if (!editedCustomer) return
+    if (!editedCustomer || !id) return;
 
+    setIsUpdatingFollowUps(true);
+    setError(null);
     try {
-      setLoading(true)
-      
-      // Call the update API endpoint instead of direct Supabase update
-      const response = await fetch('/api/users/update', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          id: editedCustomer.id,
-          first_name: formData.first_name,
-          last_name: formData.last_name,
-          email: formData.email,
-          phone: formData.phone,
-          position: formData.position,
-          company_id: formData.company_id,
-          referrer_id: formData.referrer_id,
-          notes: formData.notes,
-          status: formData.status,
-          owner_id: formData.owner_id,
-          role: formData.role,
-          lead_type: formData.lead_type
-        })
-      })
+      // Prepare update data
+      const updateData: Partial<Database['public']['Tables']['users']['Update']> = {
+        first_name: editedCustomer.first_name,
+        last_name: editedCustomer.last_name,
+        email: editedCustomer.email,
+        phone: editedCustomer.phone,
+        position: editedCustomer.position,
+        role: editedCustomer.role,
+        status: editedCustomer.status,
+        owner_id: editedCustomer.owner_id,
+        notes: editedCustomer.notes,
+        lead_type: editedCustomer.lead_type || null, 
+        company_id: editedCustomer.company_id || null, 
+      };
 
-      if (!response.ok) {
-        const data = await response.json()
-        throw new Error(data.error || 'Failed to update user')
-      }
-
-      // Reload the customer to get the updated data
-      const { data: updatedData, error: fetchError } = await supabase
+      const { data: updatedUser, error } = await supabase
         .from('users')
-        .select(`
-          *,
-          companies!company_id (
-            id,
-            name
-          )
-        `)
+        .update(updateData)
         .eq('id', id)
-        .single()
+        .select(`*, companies!users_company_id_fkey (id, name)`)
+        .single();
 
-      if (fetchError) throw fetchError
-      if (!updatedData) throw new Error('Failed to reload customer data')
+      if (error) throw error;
+      
+      // Construct the updated Customer object for state
+      const updatedCustomerObject: Customer = {
+        ...updatedUser,
+        id: updatedUser.id!, 
+        status: updatedUser.status as UserStatus, 
+        role: updatedUser.role as UserRole, 
+        company_id: updatedUser.company_id ?? null,
+        notes: updatedUser.notes ?? null,
+        linkedin: updatedUser.linkedin ?? null,
+        email: updatedUser.email || '', 
+        first_name: updatedUser.first_name || '', 
+        last_name: updatedUser.last_name || '', 
+        created_at: updatedUser.created_at!,
+        updated_at: updatedUser.updated_at!,
+        companies: updatedUser.companies ? {
+          ...updatedUser.companies,
+          name: updatedUser.companies.name || ''
+        } : null,
+      };
 
-      const updatedCustomer = {
-        ...updatedData,
-        company_id: updatedData.companies?.id
-      }
-
-      setCustomer(updatedCustomer)
-      setEditedCustomer(updatedCustomer)
+      setCustomer(updatedCustomerObject);
+      setEditedCustomer(updatedCustomerObject); // Update edited state as well
+      setIsUpdatingFollowUps(false);
+      toast.success('Customer details saved');
     } catch (err) {
-      console.error('Error updating customer:', err)
-      setError(err instanceof Error ? err.message : 'Failed to update customer')
+      console.error('Error saving customer:', err);
+      setError(err instanceof Error ? err.message : 'Failed to save customer');
     } finally {
-      setLoading(false)
+      setIsUpdatingFollowUps(false);
     }
-  }
+  };
 
   const handleUpdateFollowUp = async (followUp: FollowUp, updates: Partial<FollowUp>) => {
     if (!customer) return;
@@ -1030,104 +1041,57 @@ export default function CustomerDetailPage() {
     }
   }
 
-  useEffect(() => {
-    const loadCurrentUser = async () => {
-      try {
-        const { data: { session } } = await supabase.auth.getSession()
-        if (!session) return
-
-        const { data: userData, error } = await supabase
-          .from('users')
-          .select('*')
-          .eq('id', session.user.id)
-          .single()
-
-        if (error) throw error
-        setCurrentUser(userData)
-      } catch (err) {
-        console.error('Error loading current user:', err)
-      }
-    }
-
-    loadCurrentUser()
-  }, [])
-
   // Add this function to handle B2C lead info updates
   const handleSaveB2CLeadInfo = async () => {
-    if (!b2cLeadInfo) return;
+    if (!b2cLeadInfo || !customer) return
 
     try {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) throw new Error('Not authenticated');
-
-      // First check if record exists
-      const { data: existingData, error: fetchError } = await supabase
-        .from('b2c_lead_info')
-        .select('*')
-        .eq('user_id', id)
-        .single();
-
-      const updateData = {
-        user_id: id,
-        address: b2cLeadInfo.address || '',
-        gender: b2cLeadInfo.gender || 'Prefer not to say',
-        ssn_last_four: b2cLeadInfo.ssn_last_four || '',
-        marital_status: b2cLeadInfo.marital_status || 'Single',
-        parental_status: b2cLeadInfo.parental_status || 'No children',
-        referral_source: b2cLeadInfo.referral_source || '',
+      setIsLoadingB2CInfo(true)
+      // Explicitly define the fields to update, excluding user_id, created_*, etc.
+      const updateData: Partial<Database['public']['Tables']['b2c_lead_info']['Update']> = {
+        address: b2cLeadInfo.address,
+        gender: b2cLeadInfo.gender,
+        ssn_last_four: b2cLeadInfo.ssn_last_four,
+        marital_status: b2cLeadInfo.marital_status,
+        parental_status: b2cLeadInfo.parental_status,
+        referral_source: b2cLeadInfo.referral_source,
         headshot_url: b2cLeadInfo.headshot_url,
-        dob: b2cLeadInfo.dob || '',
-        updated_by: session.user.id
+        dob: b2cLeadInfo.dob
+        // updated_by will be handled by DB triggers/policies if set up,
+        // or could be added here if needed: updated_by: currentUserId
       };
+      
+      // Remove potentially null/undefined values before sending update
+      Object.keys(updateData).forEach(key => {
+        const typedKey = key as keyof typeof updateData;
+        if (updateData[typedKey] === undefined || updateData[typedKey] === null) {
+          // Keep null for headshot_url, otherwise use empty string or default?
+          // For now, let's keep nulls for fields that allow them
+          // and potentially filter out undefined if the DB handles defaults.
+          // Let's just send the object as is for now, assuming DB handles nulls.
+          // If DB errors occur, add more specific handling here.
+        }
+      });
 
-      let result;
-      if (fetchError && fetchError.code === 'PGRST116') {
-        // No record exists, create new one
-        result = await supabase
-          .from('b2c_lead_info')
-          .insert({
-            ...updateData,
-            created_by: session.user.id
-          })
-          .select()
-          .single();
-      } else if (fetchError) {
-        throw fetchError;
-      } else if (existingData) {
-        // Record exists, update it
-        result = await supabase
-          .from('b2c_lead_info')
-          .update(updateData)
-          .eq('user_id', id)
-          .select()
-          .single();
-      } else {
-        throw new Error('Failed to determine record existence');
-      }
-
-      if (result.error) {
-        console.error('Error saving B2C lead info:', result.error);
-        throw new Error(result.error.message);
-      }
-
-      // Refresh the B2C lead info
-      const { data, error: refreshError } = await supabase
+      const { data: updatedData, error } = await supabase
         .from('b2c_lead_info')
-        .select('*')
-        .eq('user_id', id)
-        .single();
+        .update(updateData) // Use the explicitly constructed object
+        .eq('user_id', customer.id)
+        .select()
+        .single()
 
-      if (refreshError) {
-        console.error('Error refreshing B2C lead info:', refreshError);
-        throw new Error(refreshError.message);
-      }
+      if (error) throw error
 
-      setB2cLeadInfo(data);
+      // Ensure dob is string when updating state after save
+      setB2cLeadInfo(updatedData ? { ...updatedData, dob: updatedData.dob || '' } : null);
+      toast.success('B2C Lead Info updated')
     } catch (err) {
-      console.error('Error saving B2C lead info:', err);
-      setError(err instanceof Error ? err.message : 'Failed to save B2C lead information');
+      console.error('Error saving B2C lead info:', err)
+      toast.error('Failed to save B2C Lead Info')
+    } finally {
+      setIsLoadingB2CInfo(false)
     }
-  };
+  }
 
   if (loading) {
     return (

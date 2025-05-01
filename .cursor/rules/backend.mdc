@@ -3,6 +3,12 @@ description: Backend development standards and patterns
 globs: ["**/api/**/*.{ts,js}", "**/services/**/*.{ts,js}", "**/lib/**/*.{ts,js}"]
 alwaysApply: true
 ---
+---
+description: Backend development standards and patterns
+alwaysApply: true
+---
+
+
 # Backend Documentation
 
 ## API Structure

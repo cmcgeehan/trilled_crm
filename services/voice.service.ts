@@ -1,5 +1,6 @@
 import { Device } from '@twilio/voice-sdk';
 import { supabase } from '@/lib/supabase';
+import { AgentStatus } from '@/lib/utils';
 
 export class VoiceService {
   private device: Device | null = null;
@@ -71,7 +72,7 @@ export class VoiceService {
     }
   }
 
-  async updateAvailability(status: 'available' | 'busy' | 'unavailable'): Promise<void> {
+  async updateAvailability(status: AgentStatus): Promise<void> {
     try {
       // Get the current user first
       const { data: { user } } = await supabase.auth.getUser();
@@ -79,72 +80,54 @@ export class VoiceService {
         throw new Error('No authenticated user');
       }
 
+      console.log(`[VoiceService] Updating availability for user ${user.id} to status: ${status}`);
+
       // Update availability status in the database using upsert
       const { error } = await supabase
         .from('user_phone_status')
         .upsert({
           user_id: user.id,
-          status,
+          status: status,
           last_updated: new Date().toISOString()
         }, {
           onConflict: 'user_id'
         });
 
       if (error) {
-        console.error('Error updating availability status:', error);
+        console.error('Error updating availability status in DB:', error);
         throw error;
       }
+      console.log(`[VoiceService] DB status updated successfully to: ${status}`);
 
-      // Only handle device registration for available/unavailable states
-      if (status === 'available') {
+      // Handle device registration based on status
+      if (status === AgentStatus.AVAILABLE) {
         if (!this.device) {
-          console.warn('Device not initialized, attempting to initialize...');
-          await this.initialize();
-        }
-        
-        if (this.device && !this.isRegistered) {
+          console.warn('[VoiceService] Device not initialized, attempting to initialize...');
+          console.error('[VoiceService] Cannot register: Device not initialized.');
+        } else if (!this.isRegistered) {
+          console.log('[VoiceService] Status is AVAILABLE, registering device...');
           await this.device.register();
           this.isRegistered = true;
+          console.log('[VoiceService] Device registered.');
+        } else {
+           console.log('[VoiceService] Status is AVAILABLE, device already registered.');
         }
-      } else if (status === 'unavailable') {
+      } else if (status === AgentStatus.UNAVAILABLE) {
         if (this.device && this.isRegistered) {
+          console.log('[VoiceService] Status is UNAVAILABLE, unregistering device...');
           await this.device.unregister();
           this.isRegistered = false;
+           console.log('[VoiceService] Device unregistered.');
+        } else {
+           console.log('[VoiceService] Status is UNAVAILABLE, device already unregistered or not initialized.');
         }
+      } else {
+         // For BUSY or WRAP_UP status, we don't change the device registration state
+         console.log(`[VoiceService] Status is ${status}. No change to device registration needed.`);
       }
-      // For 'busy' status, we don't change the device registration state
+
     } catch (error) {
-      console.error('Error updating availability:', error);
-      throw error;
-    }
-  }
-
-  // New method to handle call state without affecting registration
-  async setCallState(isInCall: boolean): Promise<void> {
-    try {
-      // Get the current user
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) {
-        throw new Error('No authenticated user');
-      }
-
-      // Update call state in the database
-      const { error } = await supabase
-        .from('user_phone_status')
-        .upsert({
-          user_id: user.id,
-          status: isInCall ? 'busy' : 'available',
-          last_updated: new Date().toISOString()
-        }, {
-          onConflict: 'user_id'
-        });
-
-      if (error) {
-        console.error('Error updating call state:', error);
-        throw error;
-      }
-    } catch (error) {
-      console.error('Error setting call state:', error);
+      console.error(`[VoiceService] Error updating availability to ${status}:`, error);
       throw error;
     }
   }

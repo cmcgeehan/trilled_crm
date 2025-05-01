@@ -1,6 +1,6 @@
 ---
 description: 
-globs: **/*.{tsx,ts}", "!**/*.test.{tsx,ts}", "!**/*.spec.{tsx,ts}
+globs: **/*.{tsx, "!**/*.test.{tsx, "!**/*.spec.{tsx
 alwaysApply: false
 ---
 ---

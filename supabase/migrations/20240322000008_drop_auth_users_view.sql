@@ -1,1 +1,0 @@
-DROP VIEW IF EXISTS public.auth_users_view; 

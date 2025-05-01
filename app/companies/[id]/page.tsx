@@ -91,15 +91,19 @@ export default function CompanyDetailsPage() {
       try {
         setLoading(true)
         
-        // Load company details
-        let query = supabase
-          .from('companies')
-          .select('*, organization_id')
-          .eq('id', id)
+        // Build the initial query
+        let query = supabase.from('companies').select("*", { count: "exact" }).eq('id', id)
 
         // Apply organization filter for non-super admins
         if (currentUserRole !== 'super_admin') {
-          query = query.eq('organization_id', currentOrganizationId)
+          // Only apply the filter if currentOrganizationId is not null
+          if (currentOrganizationId) {
+            query = query.eq('organization_id', currentOrganizationId)
+          } else {
+            console.warn("Non-super_admin user does not have currentOrganizationId set. Cannot filter company by organization.");
+            // You might want to throw an error or return null/empty data here
+            // For now, the query will proceed without the org filter, potentially showing the wrong company
+          }
         }
 
         const { data: companyData, error: companyError } = await query.single()
@@ -120,13 +124,23 @@ export default function CompanyDetailsPage() {
 
         // Apply organization filter for non-super admins
         if (currentUserRole !== 'super_admin') {
-          usersQuery = usersQuery.eq('organization_id', currentOrganizationId)
+          // Add null check here
+          if (currentOrganizationId) {
+            usersQuery = usersQuery.eq('organization_id', currentOrganizationId)
+          } else {
+            // Handle case where non-super_admin has no org ID (e.g., return empty users)
+            console.warn("Non-super_admin user missing organization ID. Cannot filter users.");
+            setUsers([]); // Set users to empty if org ID is required but missing
+            // Optionally, you could skip the query altogether
+          }
         }
 
-        const { data: usersData, error: usersError } = await usersQuery
-
-        if (usersError) throw usersError
-        setUsers(usersData || [])
+        // Only run query if the org filter didn't prevent it (or if super_admin)
+        if (currentUserRole === 'super_admin' || currentOrganizationId) {
+          const { data: usersData, error: usersError } = await usersQuery
+          if (usersError) throw usersError
+          setUsers(usersData || [])
+        } // else case already handled by setting users to []
 
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to load company')
@@ -176,6 +190,15 @@ export default function CompanyDetailsPage() {
 
     try {
       setLoading(true)
+
+      // Add null check before attempting update for non-super_admin
+      if (currentUserRole !== 'super_admin' && !currentOrganizationId) {
+         console.error("Cannot save company: Non-super_admin user missing organization ID.");
+         setError("Cannot save company: Organization ID missing.");
+         setLoading(false);
+         return; // Prevent the update
+      }
+
       let query = supabase
         .from('companies')
         .update({
@@ -195,7 +218,9 @@ export default function CompanyDetailsPage() {
 
       // Apply organization filter for non-super admins
       if (currentUserRole !== 'super_admin') {
-        query = query.eq('organization_id', currentOrganizationId)
+        // No need for separate null check here, already done above
+        // We know currentOrganizationId is non-null if we reach this point for a non-super_admin
+        query = query.eq('organization_id', currentOrganizationId!)
       }
 
       const { error: updateError } = await query

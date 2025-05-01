@@ -3,6 +3,12 @@ description:
 globs: 
 alwaysApply: true
 ---
+---
+description: Core information for the build of this project, relevant to all work
+globs: ["**/*.{tsx,ts}", "!**/*.test.{tsx,ts}", "!**/*.spec.{tsx,ts}"]
+alwaysApply: true
+---
+
 # General Documentation
 
 ## Overview

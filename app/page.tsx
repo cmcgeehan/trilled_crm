@@ -235,7 +235,7 @@ export default function DashboardPage() {
         // First sort by lead type (B2C first)
         if (a.role === 'lead' && b.role === 'lead') {
           if (a.lead_type !== b.lead_type) {
-            return a.lead_type === 'B2C' ? -1 : 1
+            return a.lead_type === 'potential_customer' ? -1 : 1
           }
         }
         // Then by role (leads first)
@@ -249,7 +249,24 @@ export default function DashboardPage() {
       })
 
       console.log('Sorted users:', sortedUsers)
-      setUsers(sortedUsers)
+      
+      // Filter out users with null email AND map data to match local User type
+      const validUsers = sortedUsers
+        .filter(user => user.email !== null) // Ensure email is not null
+        .map(user => ({
+          ...user,
+          email: user.email!, // Assert email is non-null after filter
+          // Map lead_type from DB values to local type values
+          lead_type: user.lead_type === 'referral_partner' ? 'Referral Partner' :
+                     user.lead_type === 'potential_customer' ? 'Potential Customer' :
+                     undefined, // Convert null to undefined
+          // Ensure other required fields from User type are present or provide defaults
+          first_name: user.first_name || '', 
+          last_name: user.last_name || '', 
+          // Add any other necessary transformations or defaults here
+        })) as User[]; // Assert the final mapped array as User[]
+        
+      setUsers(validUsers)
     } catch (error) {
       console.error('Error fetching users:', error)
     }

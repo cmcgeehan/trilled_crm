@@ -43,3 +43,12 @@ export const formatCompanyType = (type: string) => {
     .map(word => word.charAt(0).toUpperCase() + word.slice(1))
     .join(' ')
 }
+
+export enum AgentStatus {
+  UNAVAILABLE = 'unavailable',
+  AVAILABLE = 'available',
+  BUSY = 'busy',
+  WRAP_UP = 'wrap-up',
+  AWAY = 'away',
+  OFFLINE = 'offline',
+}

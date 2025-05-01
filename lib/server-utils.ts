@@ -67,8 +67,30 @@ export const getServerOrganization = async () => {
   const { data: organization } = await supabase
     .from('organizations')
     .select('*')
+    .eq('id', user.organization_id!)
+    .single()
+
+  return organization
+}
+
+export async function getCurrentOrganization(user: { organization_id: string | null }) {
+  if (!user.organization_id) {
+    console.log("User has no organization ID, cannot fetch organization.");
+    return null;
+  }
+
+  const supabase = getServerSupabase();
+
+  const { data: organization, error } = await supabase
+    .from('organizations')
+    .select('*')
     .eq('id', user.organization_id)
     .single()
+
+  if (error) {
+    console.error('Error fetching organization:', error)
+    return null
+  }
 
   return organization
 } 

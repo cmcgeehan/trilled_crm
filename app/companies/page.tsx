@@ -84,10 +84,10 @@ export default function CompaniesPage() {
       })
 
       const { data, error } = await supabase.rpc('get_companies_with_count', {
-        p_organization_id: currentOrganizationId,
-        p_type: typeFilter,
-        p_neighborhood: neighborhoodFilter,
-        p_search: searchTerm || null,
+        p_organization_id: currentOrganizationId ?? undefined,
+        p_type: typeFilter ?? undefined,
+        p_neighborhood: neighborhoodFilter ?? undefined,
+        p_search: searchTerm ?? undefined,
         p_limit: itemsPerPage,
         p_offset: (currentPage - 1) * itemsPerPage,
         p_sort_field: sortField,
@@ -105,9 +105,13 @@ export default function CompaniesPage() {
         return
       }
 
-      const { companies, total_count } = data[0]
+      // Explicitly cast the expected structure from the RPC result
+      const { companies, total_count } = data[0] as { companies: Company[], total_count: number }; 
+      
       setTotalCount(total_count || 0)
-      setCompanies(companies || [])
+      // Now TS should know 'companies' is Company[] or potentially null/undefined from the cast
+      setCompanies(companies || []) // Keep the default empty array just in case
+      
     } catch (err) {
       console.error('Error loading companies:', err)
     } finally {

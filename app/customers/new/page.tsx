@@ -6,10 +6,15 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
-import { supabase } from "@/lib/supabase"
+import { createBrowserClient } from '@supabase/ssr'
+import { Database } from '@/types/supabase'
 
 export default function NewCustomerPage() {
   const router = useRouter()
+  const [supabase] = useState(() => createBrowserClient<Database>(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+  ))
   const [loading, setLoading] = useState(false)
   const [initializing, setInitializing] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -51,7 +56,7 @@ export default function NewCustomerPage() {
     }
 
     checkSession()
-  }, [router])
+  }, [router, supabase])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()

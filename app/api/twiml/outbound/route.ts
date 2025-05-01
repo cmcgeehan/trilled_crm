@@ -27,7 +27,7 @@ export async function GET(request: Request) {
   const dial = twiml.dial({
     callerId: process.env.NEXT_PUBLIC_TWILIO_PHONE_NUMBER,
     record: 'record-from-answer', // This will start recording when the call is answered
-    action: '/api/twilio/status', // CORRECTED: Use /api/twilio/status
+    action: '/api/twiml/status', // Add status callback
     method: 'POST'
   });
   dial.number(to);

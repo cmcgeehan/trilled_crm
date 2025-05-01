@@ -116,7 +116,7 @@ export async function POST(request: Request) {
         callerId: fromNumber,
         timeout: 30,
         record: 'record-from-answer',
-        action: `/api/twilio/status?fromNumber=${encodeURIComponent(fromNumber)}`,
+        action: `/api/twiml/status?fromNumber=${encodeURIComponent(fromNumber)}`,
         method: 'POST'
       });
       
@@ -266,7 +266,7 @@ export async function POST(request: Request) {
         callerId: fromNumber,
         timeout: 30,
         record: 'record-from-answer',
-        action: `/api/twilio/status?fromNumber=${encodeURIComponent(fromNumber)}`,
+        action: `/api/twilio/status?fromNumber=${encodeURIComponent(fromNumber)}`, // Correct action URL for the main Dial
         method: 'POST'
       });
 
@@ -275,7 +275,7 @@ export async function POST(request: Request) {
         console.log('Adding client to dial:', userId);
         dial.client({
           statusCallbackEvent: ['initiated', 'ringing', 'answered', 'completed'],
-          statusCallback: `/api/twilio/status?fromNumber=${encodeURIComponent(fromNumber)}`,
+          statusCallback: `/api/twilio/status?fromNumber=${encodeURIComponent(fromNumber)}`, // Correct callback URL
           statusCallbackMethod: 'POST'
         }, userId);
       });

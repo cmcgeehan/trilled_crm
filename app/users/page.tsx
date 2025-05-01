@@ -15,6 +15,7 @@ import { useRouter } from "next/navigation"
 import { Database } from "@/types/supabase"
 import { toast } from "react-hot-toast"
 import { CallButton } from "@/components/call/call-button"
+import { DropdownMenuItem } from "@/components/ui/dropdown-menu"
 
 type User = Omit<Database['public']['Tables']['users']['Row'], 'status'> & {
   status: UserStatus,
@@ -90,7 +91,12 @@ export default function UsersPage() {
 
       // Apply organization filter for non-super admins
       if (currentUserRole !== 'super_admin') {
-        query = query.eq('organization_id', currentOrganizationId)
+        if (currentOrganizationId) {
+          query = query.eq('organization_id', currentOrganizationId)
+        } else {
+          console.warn('Non-super_admin has no organization ID. Filtering out all users.')
+          query = query.eq('id', 'invalid-uuid')
+        }
       }
 
       const { data, error, count } = await query
@@ -101,7 +107,37 @@ export default function UsersPage() {
         return
       }
 
-      setUsers(data || [])
+      // Map fetched data to match local User type before setting state
+      const mappedUsers = (data || []).map(user => {
+        const status = (user.status ?? 'new') as UserStatus;
+        const lead_type = user.lead_type ?? null;
+
+        const mappedUser: User = {
+          // Spread the original user object first
+          ...user, 
+          // Then overwrite/add fields to match the User type
+          id: user.id!, 
+          email: user.email || '', 
+          first_name: user.first_name || '',
+          last_name: user.last_name || '',
+          role: user.role as UserRole, 
+          status: status, // Overwrite with the validated status
+          lead_type: lead_type, 
+          company_id: user.company_id ?? null, 
+          owner_id: user.owner_id ?? null, 
+          created_at: user.created_at!, 
+          updated_at: user.updated_at!, 
+          companies: user.companies ? {
+            id: user.companies.id!, 
+            name: user.companies.name || '' 
+          } : null,
+        };
+        // Remove fields not present in User type if necessary (e.g., if base Row has extra fields)
+        // delete (mappedUser as any).original_status_field_if_different_name;
+        return mappedUser;
+      });
+
+      setUsers(mappedUsers)
       setTotalCount(count || 0)
     } catch (err) {
       console.error('Error loading users:', err)
@@ -115,19 +151,64 @@ export default function UsersPage() {
     try {
       let query = supabase
         .from('users')
-        .select('*')
+        // Select all fields needed for the User type + companies for consistency
+        .select(`
+          *,
+          companies!company_id (
+            id,
+            name
+          )
+        `)
         .in('role', ['agent', 'admin', 'super_admin'])
         .is('deleted_at', null)
 
       // Only filter by organization for non-super admins
       if (currentUserRole !== 'super_admin') {
-        query = query.eq('organization_id', currentOrganizationId)
+        // Add null check for organization ID
+        if (currentOrganizationId) {
+          query = query.eq('organization_id', currentOrganizationId)
+        } else {
+          // Non-super_admin without org ID shouldn't see any agents
+          setAgents([]); // Set empty array and return
+          return; 
+        }
       }
 
       const { data: agentUsers, error } = await query
 
       if (error) throw error
-      setAgents(agentUsers || [])
+      
+      // Map fetched agent data to match local User type
+      const mappedAgents = (agentUsers || []).map(agent => {
+        const status = (agent.status ?? 'new') as UserStatus; 
+        const lead_type = agent.lead_type ?? null;
+        
+        const mappedAgent: User = {
+          // Spread the original agent object first
+          ...agent,
+          // Then overwrite/add fields to match the User type
+          id: agent.id!, 
+          email: agent.email || '', 
+          first_name: agent.first_name || '',
+          last_name: agent.last_name || '',
+          role: agent.role as UserRole, 
+          status: status, // Overwrite with the validated status
+          lead_type: lead_type, 
+          company_id: agent.company_id ?? null, 
+          owner_id: agent.owner_id ?? null, 
+          created_at: agent.created_at!, 
+          updated_at: agent.updated_at!, 
+          companies: agent.companies ? {
+            id: agent.companies.id!, 
+            name: agent.companies.name || '' 
+          } : null,
+        };
+        // Remove fields not present in User type if necessary
+        // delete (mappedAgent as any).original_status_field_if_different_name;
+        return mappedAgent;
+      });
+
+      setAgents(mappedAgents) // Set the correctly typed agents
     } catch (error) {
       console.error('Error loading agents:', error)
       toast.error('Failed to load agents')
@@ -224,6 +305,33 @@ export default function UsersPage() {
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter') {
       handleSearch()
+    }
+  }
+
+  const deleteUser = async (userId: string) => {
+    try {
+      const { data: { session } } = await supabase.auth.getSession()
+      if (!session) {
+        console.error('No session found for deleting user')
+        return
+      }
+
+      const { error } = await supabase
+        .from('users')
+        .update({ deleted_at: new Date().toISOString() })
+        .eq('id', userId)
+        .eq('owner_id', session.user.id)
+
+      if (error) {
+        console.error('Error deleting user:', error)
+        toast.error('Error deleting user')
+      } else {
+        toast.success('User deleted successfully')
+        loadUsers()
+      }
+    } catch (error) {
+      console.error('Error deleting user:', error)
+      toast.error('Error deleting user')
     }
   }
 
@@ -461,6 +569,23 @@ export default function UsersPage() {
                   </TableCell>
                   <TableCell className="py-2 text-sm whitespace-nowrap">
                     {user.created_at ? format(new Date(user.created_at), 'MMM d, yyyy') : '-'}
+                  </TableCell>
+                  <TableCell className="py-2">
+                    <DropdownMenuItem 
+                      onClick={(e) => {
+                        e.stopPropagation(); // Prevent row click navigation
+                        // Keep the null check for user.id
+                        if (user.id) {
+                          deleteUser(user.id);
+                        } else {
+                          console.error('Cannot delete user without ID');
+                          toast.error('Cannot delete user: ID missing');
+                        }
+                      }}
+                      className="text-red-600"
+                    >
+                      Delete
+                    </DropdownMenuItem>
                   </TableCell>
                 </TableRow>
               ))

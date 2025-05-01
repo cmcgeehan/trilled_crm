@@ -11,20 +11,30 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import { supabase } from "@/lib/supabase"
+import { createBrowserClient } from '@supabase/ssr'
+import { Database } from "@/types/supabase"
 import { useEffect, useState } from "react"
 import { cn } from "@/lib/utils"
 import { Users, LayoutDashboard, Building2, Building, Phone } from "lucide-react"
-import { Database } from "@/types/supabase"
 import { Button } from "@/components/ui/button"
-import { CallOverlay } from "@/components/call/call-overlay"
 import { Skeleton } from "@/components/ui/skeleton"
+import dynamic from 'next/dynamic'
+
+// Dynamically import CallOverlay with ssr: false
+const DynamicCallOverlay = dynamic(
+  () => import('@/components/call/call-overlay').then((mod) => mod.CallOverlay),
+  { ssr: false }
+)
 
 type Organization = Database['public']['Tables']['organizations']['Row']
 
 export function NavBar() {
   const router = useRouter()
   const pathname = usePathname()
+  const [supabase] = useState(() => createBrowserClient<Database>(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+  ))
   const [userEmail, setUserEmail] = useState<string | null>(null)
   const [isSuperAdmin, setIsSuperAdmin] = useState(false)
   const [organizations, setOrganizations] = useState<Organization[]>([])
@@ -86,7 +96,9 @@ export function NavBar() {
                 max_users,
                 created_at,
                 updated_at,
-                deleted_at
+                deleted_at,
+                subscription_period_end, 
+                subscription_period_start
               `)
               .is('deleted_at', null)
               .order('name')
@@ -137,7 +149,7 @@ export function NavBar() {
     return () => {
       subscription.unsubscribe()
     }
-  }, [router])
+  }, [router, supabase])
 
   // Add debug renders
   console.log('Render state:', {
@@ -314,7 +326,7 @@ export function NavBar() {
           </div>
         </div>
       </div>
-      <CallOverlay
+      <DynamicCallOverlay
         isOpen={isCallOverlayOpen}
         onClose={() => setIsCallOverlayOpen(false)}
       />

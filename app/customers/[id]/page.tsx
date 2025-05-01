@@ -153,7 +153,9 @@ export default function CustomerDetailPage({ params }: { params: Promise<{ id: s
         return
       }
 
-      setFollowUps(followUps || [])
+      // Filter out follow-ups with null user_id before setting state
+      const validFollowUps = followUps?.filter(fu => fu.user_id !== null) as FollowUp[] | undefined;
+      setFollowUps(validFollowUps || [])
     } catch (error) {
       console.error('Error loading follow-ups:', error)
     }
@@ -181,8 +183,8 @@ export default function CustomerDetailPage({ params }: { params: Promise<{ id: s
 
       const customer: Customer = {
         ...userData,
-        name: userData.first_name && userData.last_name ? `${userData.first_name} ${userData.last_name}` : userData.first_name || userData.last_name || undefined,
-        company: userData.companies?.name || undefined
+        name: (userData.first_name && userData.last_name ? `${userData.first_name} ${userData.last_name}` : userData.first_name || userData.last_name) || undefined,
+        company: userData.companies?.name || null
       }
 
       setCustomer(customer)
@@ -714,7 +716,7 @@ export default function CustomerDetailPage({ params }: { params: Promise<{ id: s
                         Status
                       </Label>
                       <Select
-                        value={editedCustomer.status}
+                        value={editedCustomer.status ?? undefined}
                         onValueChange={(value: UserStatus) => handleStatusChange(value)}
                       >
                         <SelectTrigger id="status" className="col-span-3">
