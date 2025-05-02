@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Badge } from "@/components/ui/badge"
 import { supabase } from "@/lib/supabase"
-import { Plus, Search } from "lucide-react"
+import { Plus, Search, MoreHorizontal, Trash2 } from "lucide-react"
 import { format } from "date-fns"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { cn } from "@/lib/utils"
@@ -15,7 +15,7 @@ import { useRouter } from "next/navigation"
 import { Database } from "@/types/supabase"
 import { toast } from "react-hot-toast"
 import { CallButton } from "@/components/call/call-button"
-import { DropdownMenuItem } from "@/components/ui/dropdown-menu"
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 
 type User = Omit<Database['public']['Tables']['users']['Row'], 'status'> & {
   status: UserStatus,
@@ -502,7 +502,8 @@ export default function UsersPage() {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {loading ? (
+            {/* Temporarily comment out the user mapping to isolate the error */}
+            {/* {loading ? (
               <TableRow>
                 <TableCell colSpan={8} className="text-center py-3 text-sm">
                   Loading users...
@@ -570,26 +571,45 @@ export default function UsersPage() {
                   <TableCell className="py-2 text-sm whitespace-nowrap">
                     {user.created_at ? format(new Date(user.created_at), 'MMM d, yyyy') : '-'}
                   </TableCell>
-                  <TableCell className="py-2">
-                    <DropdownMenuItem 
-                      onClick={(e) => {
-                        e.stopPropagation(); // Prevent row click navigation
-                        // Keep the null check for user.id
-                        if (user.id) {
-                          deleteUser(user.id);
-                        } else {
-                          console.error('Cannot delete user without ID');
-                          toast.error('Cannot delete user: ID missing');
-                        }
-                      }}
-                      className="text-red-600"
-                    >
-                      Delete
-                    </DropdownMenuItem>
+                  <TableCell className="py-2 text-right"> 
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button variant="ghost" className="h-8 w-8 p-0">
+                          <span className="sr-only">Open menu</span>
+                          <MoreHorizontal className="h-4 w-4" />
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end">
+                        <DropdownMenuItem 
+                          onClick={(e) => {
+                            e.stopPropagation(); // Prevent row click navigation
+                            // Navigate to user page
+                            router.push(`/users/${user.id}`);
+                          }}
+                        >
+                          View Details
+                        </DropdownMenuItem>
+                         <DropdownMenuItem 
+                          onClick={(e) => {
+                            e.stopPropagation(); // Prevent row click navigation
+                            if (user.id) {
+                              deleteUser(user.id);
+                            } else {
+                              console.error('Cannot delete user without ID');
+                              toast.error('Cannot delete user: ID missing');
+                            }
+                          }}
+                          className="text-red-600"
+                        >
+                          <Trash2 className="mr-2 h-4 w-4" />
+                          Delete User
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
                   </TableCell>
                 </TableRow>
               ))
-            )}
+            )} */}
           </TableBody>
         </Table>
       </div>
