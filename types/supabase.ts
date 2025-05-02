@@ -7,6 +7,31 @@ export type Json =
   | Json[]
 
 export type Database = {
+  graphql_public: {
+    Tables: {
+      [_ in never]: never
+    }
+    Views: {
+      [_ in never]: never
+    }
+    Functions: {
+      graphql: {
+        Args: {
+          operationName?: string
+          query?: string
+          variables?: Json
+          extensions?: Json
+        }
+        Returns: Json
+      }
+    }
+    Enums: {
+      [_ in never]: never
+    }
+    CompositeTypes: {
+      [_ in never]: never
+    }
+  }
   public: {
     Tables: {
       b2c_lead_info: {
@@ -78,8 +103,8 @@ export type Database = {
       calls: {
         Row: {
           call_sid: string | null
-          communication_id: number | null
           created_at: string | null
+          direction: string | null
           duration: number | null
           ended_at: string | null
           from_number: string
@@ -95,8 +120,8 @@ export type Database = {
         }
         Insert: {
           call_sid?: string | null
-          communication_id?: number | null
           created_at?: string | null
+          direction?: string | null
           duration?: number | null
           ended_at?: string | null
           from_number: string
@@ -112,8 +137,8 @@ export type Database = {
         }
         Update: {
           call_sid?: string | null
-          communication_id?: number | null
           created_at?: string | null
+          direction?: string | null
           duration?: number | null
           ended_at?: string | null
           from_number?: string
@@ -128,13 +153,6 @@ export type Database = {
           updated_at?: string | null
         }
         Relationships: [
-          {
-            foreignKeyName: "calls_communication_id_fkey"
-            columns: ["communication_id"]
-            isOneToOne: false
-            referencedRelation: "communications"
-            referencedColumns: ["id"]
-          },
           {
             foreignKeyName: "calls_from_user_id_fkey"
             columns: ["from_user_id"]
@@ -1004,63 +1022,6 @@ export type Database = {
       }
     }
     Functions: {
-      check_company_permission: {
-        Args: { company_id: string }
-        Returns: boolean
-      }
-      create_user: {
-        Args: {
-          user_id: string
-          first_name: string
-          last_name: string
-          email: string
-          phone: string
-          company_id: string
-          notes: string
-          user_role: string
-          owner_id: string
-          user_status?: string
-        }
-        Returns: {
-          address_line1: string | null
-          address_line2: string | null
-          company: string | null
-          company_id: string | null
-          created_at: string
-          created_by: string | null
-          deleted_at: string | null
-          email: string | null
-          first_name: string | null
-          id: string
-          last_name: string | null
-          lead_source: string | null
-          lead_type: Database["public"]["Enums"]["lead_type"] | null
-          linkedin: string | null
-          lost_at: string | null
-          lost_reason: string | null
-          notes: string | null
-          organization_id: string | null
-          owner_id: string | null
-          phone: string | null
-          position: string | null
-          referrer_id: string | null
-          role: Database["public"]["Enums"]["user_role"]
-          sequence_position: number | null
-          sequence_type:
-            | Database["public"]["Enums"]["follow_up_sequence_type"]
-            | null
-          state_province: string | null
-          status: string | null
-          twilio_phone: string | null
-          updated_at: string | null
-          won_at: string | null
-          won_by: string | null
-        }
-      }
-      generate_next_follow_up: {
-        Args: { p_user_id: string }
-        Returns: string
-      }
       get_companies_with_count: {
         Args: {
           p_organization_id?: string
@@ -1075,17 +1036,6 @@ export type Database = {
         Returns: {
           companies: Json
           total_count: number
-        }[]
-      }
-      get_next_follow_up_date: {
-        Args: { p_user_id: string; p_current_date: string }
-        Returns: string
-      }
-      get_user_context: {
-        Args: { user_id: string }
-        Returns: {
-          organization_id: string
-          role: string
         }[]
       }
       gtrgm_compress: {
@@ -1120,26 +1070,9 @@ export type Database = {
         Args: { "": string }
         Returns: string[]
       }
-      text_to_user_role: {
-        Args: { role_text: string }
-        Returns: Database["public"]["Enums"]["user_role"]
-      }
-      transition_to_customer: {
-        Args: { p_user_id: string }
-        Returns: undefined
-      }
-      update_user_statuses_and_generate_follow_ups: {
-        Args: Record<PropertyKey, never>
-        Returns: undefined
-      }
-      update_user_statuses_for_followups: {
-        Args: Record<PropertyKey, never>
-        Returns: undefined
-      }
     }
     Enums: {
       follow_up_sequence_type: "lead" | "customer"
-      follow_up_type: "email" | "sms" | "call" | "meeting" | "tour"
       gender_type:
         | "Male"
         | "Female"
@@ -1271,10 +1204,12 @@ export type CompositeTypes<
     : never
 
 export const Constants = {
+  graphql_public: {
+    Enums: {},
+  },
   public: {
     Enums: {
       follow_up_sequence_type: ["lead", "customer"],
-      follow_up_type: ["email", "sms", "call", "meeting", "tour"],
       gender_type: [
         "Male",
         "Female",
@@ -1298,3 +1233,4 @@ export const Constants = {
     },
   },
 } as const
+

@@ -5,11 +5,12 @@ import type { Database } from '@/types/supabase'; // Import Database type
 
 // Define table types locally
 type Call = Database['public']['Tables']['calls']['Row'];
+type CallInsert = Database['public']['Tables']['calls']['Insert'];
 type CallUpdate = Database['public']['Tables']['calls']['Update'];
 type CommunicationInsert = Database['public']['Tables']['communications']['Insert'];
 
 // Initialize Supabase client
-const supabase = createClient(
+const supabase = createClient<Database>(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.SUPABASE_SERVICE_ROLE_KEY!
 );
@@ -21,175 +22,249 @@ export async function POST(request: Request) {
     const formData = await request.formData();
     const callSid = formData.get('CallSid') as string;
     const callStatus = formData.get('CallStatus') as string;
-    const called = formData.get('Called') as string; // Might be group # or client ID if direct
-    const from = formData.get('From') as string;
-    const client = formData.get('Client') as string; // Twilio Client identifier (user who answered)
+    const called = formData.get('Called') as string; // Twilio number dialed FROM (can be group#)
+    const to = formData.get('To') as string; // Destination number/client dialed TO
+    const from = formData.get('From') as string; // Originating number/client
+    const direction = formData.get('Direction') as string; // e.g., outbound-api, inbound
+    const client = formData.get('From')?.toString().startsWith('client:') 
+                   ? formData.get('From') as string 
+                   : (formData.get('To')?.toString().startsWith('client:') 
+                      ? formData.get('To') as string 
+                      : undefined); // Twilio Client identifier if involved
+
     const recordingUrl = formData.get('RecordingUrl') as string;
-    const recordingStatus = formData.get('RecordingStatus') as string;
     const recordingSid = formData.get('RecordingSid') as string;
     const callDuration = formData.get('CallDuration') as string;
-    const parentCallSid = formData.get('ParentCallSid') as string; // Not currently used, but good to have
-    const url = new URL(request.url);
-    const fromNumberParam = url.searchParams.get('fromNumber'); // Passed from inbound
+    const parentCallSid = formData.get('ParentCallSid') as string;
+    const twilioTimestamp = formData.get('Timestamp') as string; // Get Twilio's timestamp
     
     console.log('Status details:', { 
-      callSid, callStatus, called, from, fromNumberParam, client, 
-      recordingUrl, recordingStatus, recordingSid, callDuration, parentCallSid
+      callSid, callStatus, called, to, from, direction, client, 
+      recordingUrl, recordingStatus: formData.get('RecordingStatus'), recordingSid, callDuration, parentCallSid,
+      twilioTimestamp // Log Twilio's timestamp
     });
-    console.log('All form data:', Object.fromEntries(formData.entries()));
+    // console.log('All form data:', Object.fromEntries(formData.entries()));
 
-    // --- Find the Call Record --- 
+    // --- Find or Create Call Record --- 
+    let callRecord: Call | null = null;
+    let recordExisted = false;
     try {
-        // 1. Try finding by direct CallSid
-        const { data: directCallRecord, error: directError } = await supabase
+        // 1. Try finding by CallSid provided in the callback
+        const { data: existingRecord, error: findError } = await supabase
             .from('calls')
             .select('*')
             .eq('call_sid', callSid)
             .maybeSingle();
 
-        if (directError) {
-            console.error(`Error fetching direct call record ${callSid}:`, directError);
+        if (findError) {
+            console.error(`[TwiML Status] Error finding call record ${callSid}:`, findError);
+            // Continue attempt to create if necessary
         }
 
-        if (directCallRecord) {
-            // --- Record Found by Direct SID --- 
-            console.log(`Processing update for direct call record ${directCallRecord.id} (SID: ${callSid})`);
-            // Pass formData to the helper
-            await processTwimlUpdate(directCallRecord, callStatus, callDuration, recordingUrl, recordingSid, new Date().toISOString(), client, formData);
-        
-        } else if (parentCallSid) {
-            // --- Not found by Direct SID, Try Parent SID ---
-            console.log(`Direct SID ${callSid} not found. Checking ParentCallSid: ${parentCallSid}`);
-            const { data: parentCallRecord, error: parentError } = await supabase
-                .from('calls')
-                .select('*')
-                .eq('call_sid', parentCallSid)
-                .maybeSingle();
-
-            if (parentError) {
-                console.error(`Error fetching parent call record ${parentCallSid}:`, parentError);
-            }
-
-            if (parentCallRecord) {
-                // --- Record Found by Parent SID --- 
-                console.log(`Processing update for parent call record ${parentCallRecord.id} (found via Parent SID ${parentCallSid} from child ${callSid})`);
-                 // Pass formData to the helper
-                await processTwimlUpdate(parentCallRecord, callStatus, callDuration, recordingUrl, recordingSid, new Date().toISOString(), client, formData);
-            } else {
-                // --- No Record Found (Parent SID) --- 
-                console.error(`[TwiML Status] Callback received, but no matching call record found for SID ${callSid} or Parent SID ${parentCallSid}.`);
-            }
+        if (existingRecord) {
+            console.log(`[TwiML Status] Found existing call record ${existingRecord.id} for SID ${callSid}`);
+            callRecord = existingRecord;
+            recordExisted = true;
         } else {
-            // --- No Record Found (No Parent SID) --- 
-            console.error(`[TwiML Status] Callback received, but no matching call record found for SID ${callSid} and no Parent SID provided.`);
+            console.log(`[TwiML Status] No existing record found for SID ${callSid}. Checking if creation is needed...`);
+            // If no record, AND this looks like an early status for an outbound client call,
+            // potentially create a placeholder record.
+            // We only create if we get essential info early (like recordingUrl or specific status)
+            // Let's primarily rely on the frontend to create the full record.
+            // However, we *must* handle the recordingUrl if it arrives before the record exists.
+            // A potential strategy (complex) could be to temporarily store the recordingUrl elsewhere (e.g., cache)
+            // keyed by callSid and apply it later.
+            
+            // --- Simplified approach: Assume record *will* exist eventually --- 
+            // We won't create here, but the update logic below will handle adding recordingUrl whenever it comes.
+             console.log(`[TwiML Status] Record for SID ${callSid} not found. Frontend should create it. Update will be attempted.`);
+            // If the record *never* gets created by frontend, this update will silently fail.
+            // If recordingUrl arrives *after* frontend creates, it will be updated.
+            callRecord = {
+                id: 'temp-' + callSid, // Placeholder ID, will be ignored by upsert
+                call_sid: callSid,
+                status: callStatus,
+                from_number: from || '', // Ensure non-null string
+                to_number: to || '', // Ensure non-null string
+                direction: null, 
+                started_at: null, 
+                created_at: new Date().toISOString(),
+                updated_at: new Date().toISOString(),
+                // Initialize other nullable fields from Call/Row type to null
+                // parent_call_sid: parentCallSid || null, // Removed: Not expected by Call type?
+                // is_parent_call: false, // Removed: Not expected by Call type?
+                from_user_id: null,
+                to_user_id: null,
+                group_id: null,
+                ended_at: null,
+                duration: null,
+                recording_url: null
+            } satisfies Call; // Use 'satisfies' for better type checking without casting
+        }
+
+        // --- Process Update --- 
+        if (callRecord) {
+            await processTwimlUpdate(
+                callRecord, 
+                callStatus, 
+                callDuration, 
+                recordingUrl, 
+                recordingSid, 
+                twilioTimestamp, // Pass Twilio's timestamp
+                client, 
+                formData,
+                recordExisted // Pass flag indicating if record was found or is placeholder
+            );
+        } else {
+             // This case should ideally not be reached with the placeholder logic
+            console.error(`[TwiML Status] Failed to find or create placeholder for SID ${callSid}. Update skipped.`);
         }
 
     } catch (error) {
        const message = error instanceof Error ? error.message : String(error);
-       console.error('[TwiML Status Callback] Unexpected error during DB lookup:', message);
+       console.error('[TwiML Status] Error during DB lookup/processing:', message);
     }
 
-    // Always acknowledge Twilio with TwiML response
-    return new NextResponse(twiml.toString(), {
-        headers: { 'Content-Type': 'text/xml; charset=utf-8', 'Cache-Control': 'no-cache' },
-    });
+    // Always acknowledge Twilio
+    return new NextResponse(twiml.toString(), { headers: { 'Content-Type': 'text/xml; charset=utf-8' } });
 
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    console.error('[/api/twiml/status] Outer endpoint error:', message);
-    return new NextResponse(twiml.toString(), {
-      headers: {
-        'Content-Type': 'text/xml; charset=utf-8',
-        'Cache-Control': 'no-cache'
-      },
-    });
+    // ... Outer error handling ...
+    console.error('[/api/twiml/status] Outer endpoint error:', error);
+    return new NextResponse(twiml.toString(), { headers: { 'Content-Type': 'text/xml; charset=utf-8' } });
   }
 }
 
 // --- Helper Function to Process Updates --- 
 async function processTwimlUpdate(
-  callRecord: Call, // Accepts the non-null record
+  callRecord: Call, 
   callStatus: string,
   callDuration: string | undefined,
-  recordingUrl: string | undefined,
-  recordingSid: string | undefined, // Keep param even if not in DB table type
-  timestamp: string | undefined,
-  client: string | undefined, // Twilio Client Identifier
-  formData: FormData // Pass formData to access original From/Called numbers
+  recordingUrl: string | undefined, 
+  recordingSid: string | undefined, 
+  twilioTimestamp: string | undefined, // Receive Twilio's timestamp
+  client: string | undefined, 
+  formData: FormData,
+  recordExisted: boolean // Flag to know if we are updating real record or placeholder
 ) {
   try {
       const supabase = createClient<Database>(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!);
-      const targetCallSid = callRecord.call_sid!; // Assert non-null
-      // Get original numbers from formData if available, otherwise use record
+      const targetCallSid = callRecord.call_sid!; 
       const fromNumber = formData.get('From') as string || callRecord.from_number;
-      const toNumber = formData.get('Called') as string || callRecord.to_number;
+      const toNumber = formData.get('To') as string || callRecord.to_number; // Use 'To' from formData
 
-      console.log(`[processTwimlUpdate] Call SID: ${targetCallSid}, Received Status: ${callStatus}, Received RecordingURL: ${recordingUrl}`);
+      console.log(`[processTwimlUpdate] SID: ${targetCallSid}, Status: ${callStatus}, RecordingURL: ${recordingUrl}, RecordExisted: ${recordExisted}`);
 
-      // Prepare update data
+      // Prepare base update data, always include status and timestamp
       const updateData: CallUpdate = {
           status: callStatus,
-          updated_at: timestamp ? new Date(timestamp).toISOString() : new Date().toISOString(),
-          // Ensure numbers are updated if they were missing initially
-          from_number: fromNumber,
-          to_number: toNumber,
-          duration: undefined,
-          recording_url: undefined,
-          to_user_id: callRecord.to_user_id // Preserve existing user_id unless overwritten
+          // Use Twilio's timestamp if available, otherwise use current time
+          updated_at: twilioTimestamp ? new Date(twilioTimestamp).toISOString() : new Date().toISOString(), 
+          // Only include fields known to be potentially updated by status callback
       };
-      let answeringUserId: string | null = callRecord.to_user_id || null; // Default to existing if already set
 
-      // Logic to find answeringUserId based on the 'client' who answered
-      if ((callStatus === 'in-progress' || callStatus === 'answered' || callStatus === 'completed') && client) {
-          console.log(`Call ${targetCallSid} answered/handled by client: ${client}. Looking up user...`);
+      // Add recording URL if present in this callback, regardless of status
+      if (recordingUrl) {
+          console.log(`[processTwimlUpdate] RecordingUrl found: ${recordingUrl}. Adding to updateData.`);
+          updateData.recording_url = recordingUrl;
+      } else {
+          // Log if it's missing, especially on completed status
+          if (callStatus === 'completed') {
+             console.log(`[processTwimlUpdate] Completed status for ${targetCallSid} but NO RecordingUrl in this callback.`);
+          }
+      }
+      
+      // Add duration if call is completed
+      if (callStatus === 'completed') {
+          console.log(`[processTwimlUpdate] Status is 'completed' for SID: ${targetCallSid}.`);
+          if (callDuration) {
+              updateData.duration = parseInt(callDuration, 10);
+              console.log(`[processTwimlUpdate] Duration ${updateData.duration} added.`);
+          }
+          // Add ended_at timestamp on completion
+          // Use Twilio's timestamp if available, otherwise use current time
+          updateData.ended_at = twilioTimestamp ? new Date(twilioTimestamp).toISOString() : new Date().toISOString(); 
+          console.log(`[processTwimlUpdate] Ended_at ${updateData.ended_at} added.`);
+      }
+      
+      // Add answering user ID for inbound calls (only update if needed)
+      if (client && callRecord.direction === 'inbound' && (callStatus === 'in-progress' || callStatus === 'answered' || callStatus === 'completed')) {
+          console.log(`[processTwimlUpdate] Inbound call ${targetCallSid} answered/handled by client: ${client}. Looking up user...`);
           const { data: userData, error: userError } = await supabase
               .from('users')
               .select('id')
-              // Assuming client identifier format is 'client:USER_UUID' based on potential Twilio config
               .eq('id', client.startsWith('client:') ? client.substring(7) : client) 
               .maybeSingle(); 
           if (userError) {
-              console.error(`Error looking up user for client ${client}:`, userError);
+              console.error(`Error looking up answering user for client ${client}:`, userError);
+          } else if (userData && userData.id !== callRecord.to_user_id) { // Only update if different
+              console.log(`Found answering user ${userData.id} for client ${client}. Updating to_user_id.`);
+              updateData.to_user_id = userData.id; 
           } else if (userData) {
-              answeringUserId = userData.id;
-              console.log(`Found answering user ${answeringUserId} for client ${client}`);
-              updateData.to_user_id = answeringUserId; // Update the agent who handled the call
+             console.log(`Answering user ${userData.id} already matches record.to_user_id.`);
           } else {
                console.warn(`No user found for answering client identifier: ${client}`);
-               // Optionally keep the original to_user_id if lookup fails
-               updateData.to_user_id = callRecord.to_user_id; 
           }
       }
 
-      // Add completion data
-      if (callStatus === 'completed') {
-          console.log(`[processTwimlUpdate] Status is 'completed' for SID: ${targetCallSid}. Applying completion data.`);
-          if (callDuration) updateData.duration = parseInt(callDuration, 10);
-          if (recordingUrl) {
-              console.log(`[processTwimlUpdate] RecordingUrl found: ${recordingUrl}. Adding to updateData.`);
-              updateData.recording_url = recordingUrl;
-          } else {
-              console.log(`[processTwimlUpdate] No RecordingUrl received in this callback for SID: ${targetCallSid}.`);
-          }
-      }
+      // Perform the UPSERT operation
+      // This will UPDATE the record if it exists (based on call_sid), 
+      // or INSERT if it doesn't exist (relevant if FE creation is delayed/fails)
+      // Note: This requires call_sid to be unique constraint or PK
+      console.log(`[processTwimlUpdate] Preparing to upsert call SID ${targetCallSid} with data:`, JSON.stringify(updateData, null, 2));
+      
+      // Construct the full record for insertion in case it doesn't exist
+      // Merge existing placeholder/fetched data with new update data
+      const recordForUpsert: CallInsert = {
+        // Fields required or typically set on insert/initial state
+        call_sid: targetCallSid,
+        status: updateData.status || callRecord.status || 'unknown',
+        from_number: fromNumber,
+        to_number: toNumber,
+        direction: callRecord.direction || (recordExisted ? null : 'unknown'), // Try to preserve existing direction, or mark as unknown if placeholder
+        started_at: callRecord.started_at || (recordExisted ? null : new Date().toISOString()), // Try to preserve existing start, or set placeholder start
+        created_at: callRecord.created_at || new Date().toISOString(), // Preserve original create or set new
+        
+        // Fields potentially updated by status callback (from updateData)
+        updated_at: updateData.updated_at || new Date().toISOString(),
+        recording_url: updateData.recording_url !== undefined ? updateData.recording_url : callRecord.recording_url,
+        duration: updateData.duration !== undefined ? updateData.duration : callRecord.duration,
+        ended_at: updateData.ended_at !== undefined ? updateData.ended_at : callRecord.ended_at,
+        
+        // User/Group IDs (prioritize updateData if available, else callRecord)
+        from_user_id: callRecord.from_user_id, // Typically set by outbound route, not status callback
+        to_user_id: updateData.to_user_id !== undefined ? updateData.to_user_id : callRecord.to_user_id,
+        group_id: callRecord.group_id, // Typically set by inbound route, not status callback
+        
+        // Fields from Row type not in Insert type (like id, is_parent_call) are omitted
+      };
 
-      // Perform the update
-      console.log(`[processTwimlUpdate] Preparing to update call ${callRecord.id} (SID: ${targetCallSid}) with data:`, JSON.stringify(updateData, null, 2));
+      // Clean up nullish values that shouldn't overwrite existing data during upsert
+      // Supabase upsert might treat explicit null differently than missing key
+      Object.keys(recordForUpsert).forEach(key => {
+        if (recordForUpsert[key as keyof CallInsert] === undefined || recordForUpsert[key as keyof CallInsert] === null) {
+          // We might want fine-grained control here, for now let's keep explicit nulls
+          // if they were intentionally set (e.g. recording_url might become null)
+          // delete recordForUpsert[key as keyof CallInsert]; // Option to remove null/undefined
+        }
+      });
 
-      const { error: updateError } = await supabase
+      console.log(`[processTwimlUpdate] Cleaned recordForUpsert:`, JSON.stringify(recordForUpsert, null, 2));
+
+      const { error: upsertError } = await supabase
           .from('calls')
-          .update(updateData)
-          .eq('call_sid', targetCallSid);
+          .upsert(recordForUpsert, { onConflict: 'call_sid' })
 
-      if (updateError) {
-          console.error(`[processTwimlUpdate] Error updating call record ${callRecord.id} for SID ${targetCallSid}:`, JSON.stringify(updateError, null, 2));
+      if (upsertError) {
+          console.error(`[processTwimlUpdate] Error upserting call record for SID ${targetCallSid}:`, JSON.stringify(upsertError, null, 2));
       } else {
-          console.log(`[processTwimlUpdate] Successfully updated call record ${callRecord.id} (SID: ${targetCallSid})`);
+          console.log(`[processTwimlUpdate] Successfully upserted call record for SID ${targetCallSid}`);
       }
 
-      // Create Communication Record if completed
-      if (callStatus === 'completed') {
-          // Fetch the potentially updated call data AFTER the update
+      // Create Communication Record ONLY if the call is truly completed in THIS callback
+      // AND the record actually existed before this update (to avoid duplicates from FE)
+      if (callStatus === 'completed' && recordExisted) {
+          // Fetch the final data *after* the upsert to ensure consistency
           const { data: finalCallData, error: fetchFinalError } = await supabase
               .from('calls')
               .select('*')
@@ -197,14 +272,31 @@ async function processTwimlUpdate(
               .single();
 
           if (fetchFinalError || !finalCallData) {
-              console.error(`Error fetching final call data for ${targetCallSid} after update:`, fetchFinalError);
-              // Fallback to using combined data if fetch fails
-              const fallbackFinalData = { ...callRecord, ...updateData };
-              await createCommunicationRecord(fallbackFinalData, supabase);
+              console.error(`[processTwimlUpdate] Error fetching final call data for ${targetCallSid} after upsert:`, fetchFinalError);
+              // Avoid creating comms record if we can't get final data
           } else {
-              await createCommunicationRecord(finalCallData, supabase);
+              // Check if communication already exists for this call_id to prevent duplicates
+              const { data: existingComm, error: checkCommError } = await supabase
+                .from('communications')
+                .select('id')
+                .eq('communication_type', 'call')
+                .eq('communication_type_id', finalCallData.id)
+                .limit(1)
+                .maybeSingle();
+              
+              if (checkCommError) {
+                 console.error(`[processTwimlUpdate] Error checking for existing communication for call ${finalCallData.id}:`, checkCommError);
+              } else if (!existingComm) {
+                 console.log(`[processTwimlUpdate] No existing communication found for call ${finalCallData.id}. Creating one.`);
+                 await createCommunicationRecord(finalCallData, supabase);
+              } else {
+                 console.log(`[processTwimlUpdate] Communication record already exists for call ${finalCallData.id}. Skipping creation.`);
+              }
           }
+      } else if (callStatus === 'completed' && !recordExisted) {
+          console.log(`[processTwimlUpdate] Call completed for SID ${targetCallSid}, but record didn't exist prior. Frontend should handle communication creation.`);
       }
+
   } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       console.error(`[processTwimlUpdate] Error processing ${callRecord.call_sid}:`, message, error);
