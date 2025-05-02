@@ -7,14 +7,13 @@ import { Button } from "@/components/ui/button"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Badge } from "@/components/ui/badge"
 import { supabase } from "@/lib/supabase"
-import { Plus, Search } from "lucide-react"
-import { format } from "date-fns"
+import { Plus, Search, Phone } from "lucide-react"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { cn } from "@/lib/utils"
 import { useRouter } from "next/navigation"
 import { Database } from "@/types/supabase"
 import { toast } from "react-hot-toast"
-import { CallButton } from "@/components/call/call-button"
+import emitter from "@/lib/event-emitter"
 
 type User = Omit<Database['public']['Tables']['users']['Row'], 'status'> & {
   status: UserStatus,
@@ -307,6 +306,26 @@ export default function UsersPage() {
     }
   }
 
+  const handleInitiateCall = (user: User) => {
+    if (!user.phone) {
+      toast.error("User does not have a phone number.");
+      return;
+    }
+    console.log(`[UsersPage] Emitting initiate-call for ${user.phone}`);
+    
+    // Construct name, providing fallback if email is also null
+    const contactName = (`${user.first_name || ''} ${user.last_name || ''}`.trim()) || user.email || 'Unknown Contact';
+
+    emitter.emit('initiate-call', { 
+      phoneNumber: user.phone, 
+      contactInfo: { 
+        id: user.id, 
+        name: contactName
+      }
+    });
+    toast.success(`Initiating call to ${user.first_name || user.phone}...`);
+  };
+
   if (loading || dataLoading || !userContextLoaded) {
     return (
       <div className="flex items-center justify-center min-h-screen">
@@ -371,7 +390,10 @@ export default function UsersPage() {
 
         <div>
           <p className="text-xs text-muted-foreground mb-1">Owner</p>
-          <Select value={ownerFilter || "all"} onValueChange={(value) => handleOwnerFilterChange(value === "all" ? null : value)}>
+          <Select 
+            value={ownerFilter === null ? undefined : ownerFilter}
+            onValueChange={(value) => handleOwnerFilterChange(value === "all" ? null : value)}
+          >
             <SelectTrigger className="w-[180px]">
               <SelectValue placeholder="Filter by owner" />
             </SelectTrigger>
@@ -389,7 +411,7 @@ export default function UsersPage() {
 
         <div>
           <p className="text-xs text-muted-foreground mb-1">Type</p>
-          <Select value={roleFilter || "all"} onValueChange={(value: UserRole | "all") => setRoleFilter(value === "all" ? null : value)}>
+          <Select value={roleFilter === null ? undefined : roleFilter} onValueChange={(value: UserRole | "all") => setRoleFilter(value === "all" ? null : value)}>
             <SelectTrigger className="w-[180px]">
               <SelectValue placeholder="Filter by role" />
             </SelectTrigger>
@@ -406,7 +428,7 @@ export default function UsersPage() {
         <div>
           <p className="text-xs text-muted-foreground mb-1">Status</p>
           <Select 
-            value={statusFilter || "all"} 
+            value={statusFilter === null ? undefined : statusFilter} 
             onValueChange={(value) => setStatusFilter(value === "all" ? null : value as UserStatus)}
           >
             <SelectTrigger className="w-[180px]">
@@ -438,39 +460,33 @@ export default function UsersPage() {
           <TableHeader>
             <TableRow>
               <TableHead 
-                className="text-sm font-medium cursor-pointer"
+                className="text-sm font-medium cursor-pointer w-[15%] min-w-[150px]"
                 onClick={() => handleSort('first_name')}
               >
                 Name {getSortIcon('first_name')}
               </TableHead>
+              <TableHead className="text-sm font-medium min-w-[150px] max-w-[250px]">Company</TableHead>
+              <TableHead className="text-sm font-medium min-w-[150px] max-w-[150px]">Position</TableHead>
               <TableHead 
-                className="text-sm font-medium cursor-pointer"
+                className="text-sm font-medium cursor-pointer min-w-[200px] max-w-[250px]"
                 onClick={() => handleSort('email')}
               >
                 Email {getSortIcon('email')}
               </TableHead>
-              <TableHead className="text-sm font-medium">Phone</TableHead>
-              <TableHead className="text-sm font-medium">Position</TableHead>
-              <TableHead className="text-sm font-medium">Company</TableHead>
-              <TableHead className="text-sm font-medium">Actions</TableHead>
+              <TableHead className="text-sm font-medium min-w-[120px]">Phone</TableHead> 
               <TableHead 
-                className="text-sm font-medium cursor-pointer"
+                className="text-sm font-medium cursor-pointer min-w-[100px]"
                 onClick={() => handleSort('status')}
               >
                 Status {getSortIcon('status')}
               </TableHead>
               <TableHead 
-                className="text-sm font-medium cursor-pointer"
+                className="text-sm font-medium cursor-pointer min-w-[60px]" 
                 onClick={() => handleSort('role')}
               >
                 Role {getSortIcon('role')}
               </TableHead>
-              <TableHead 
-                className="text-sm font-medium cursor-pointer whitespace-nowrap"
-                onClick={() => handleSort('created_at')}
-              >
-                Created {getSortIcon('created_at')}
-              </TableHead>
+              <TableHead className="text-sm font-medium text-right min-w-[50px] px-2">Call</TableHead> 
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -490,41 +506,26 @@ export default function UsersPage() {
               filteredUsers.map((user) => (
                 <TableRow 
                   key={user.id}
-                  className="cursor-pointer hover:bg-gray-50"
-                  onClick={() => window.location.href = `/users/${user.id}`}
+                  className="hover:bg-gray-50 cursor-pointer"
+                  onClick={() => router.push(`/users/${user.id}`)}
                 >
                   <TableCell className="py-2 text-sm font-medium">
-                    {user.first_name || user.last_name ? (
-                      `${user.first_name || ''} ${user.last_name || ''}`.trim()
-                    ) : (
-                      <span className="text-gray-400">No name</span>
-                    )}
-                  </TableCell>
-                  <TableCell className="py-2 text-sm">{user.email || <span className="text-gray-400">No email</span>}</TableCell>
-                  <TableCell className="py-2 text-sm">{user.phone || <span className="text-gray-400">No phone</span>}</TableCell>
-                  <TableCell className="py-2 text-sm">{user.position || <span className="text-gray-400">No position</span>}</TableCell>
-                  <TableCell className="py-2 text-sm">{user.companies?.name || <span className="text-gray-400">No company</span>}</TableCell>
-                  <TableCell className="py-2">
-                    <div className="flex items-center gap-2">
-                      <Button
-                        variant="ghost"
-                        onClick={() => router.push(`/users/${user.id}`)}
-                      >
-                        View
-                      </Button>
-                      {user.phone && (
-                        <CallButton 
-                          phoneNumber={user.phone}
-                          variant="ghost"
-                          size="icon"
-                        />
+                    <Link href={`/users/${user.id}`} className="hover:underline" onClick={(e) => e.stopPropagation()}>
+                      {user.first_name || user.last_name ? (
+                        `${user.first_name || ''} ${user.last_name || ''}`.trim()
+                      ) : (
+                        <span className="text-gray-400">No name</span>
                       )}
-                    </div>
+                    </Link>
                   </TableCell>
-                  <TableCell className="py-2">
+                  <TableCell className="py-2 text-sm truncate max-w-[250px]">{user.companies?.name || <span className="text-gray-400">-</span>}</TableCell>
+                  <TableCell className="py-2 text-sm truncate max-w-[150px]">{user.position || <span className="text-gray-400">-</span>}</TableCell>
+                  <TableCell className="py-2 text-sm truncate max-w-[250px]">{user.email || <span className="text-gray-400">-</span>}</TableCell>
+                  <TableCell className="py-2 text-sm truncate">{user.phone || <span className="text-gray-400">-</span>}</TableCell>
+                  <TableCell className="py-2 px-2">
                     <div 
                       className={cn(
-                        "rounded-full px-2 py-0.5 text-xs font-medium w-fit",
+                        "rounded-full px-2 py-0.5 text-xs font-medium w-fit whitespace-nowrap",
                         user.status && STATUS_STYLES[user.status]?.bg || 'bg-gray-200',
                         user.status && STATUS_STYLES[user.status]?.text || 'text-gray-700'
                       )}
@@ -534,16 +535,30 @@ export default function UsersPage() {
                       ).join(' ') || 'Unknown'}
                     </div>
                   </TableCell>
-                  <TableCell className="py-2">
+                  <TableCell className="py-2 px-2">
                     <Badge variant="secondary" className="text-xs px-2 py-0.5">
                       {user.role}
                     </Badge>
                   </TableCell>
-                  <TableCell className="py-2 text-sm whitespace-nowrap">
-                    {user.created_at ? format(new Date(user.created_at), 'MMM d, yyyy') : '-'}
-                  </TableCell>
-                  <TableCell className="py-2 text-right">
-                    <p>Actions Placeholder</p> 
+                  <TableCell className="py-2 px-2 text-right">
+                     {user.phone && (
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          title="Call User"
+                          onClick={(e) => {
+                              e.stopPropagation();
+                              handleInitiateCall(user);
+                          }}
+                          className="h-7 w-7"
+                        >
+                          <Phone className="h-4 w-4" />
+                          <span className="sr-only">Call User</span>
+                        </Button>
+                     )}
+                     {!user.phone && (
+                       <div className="h-7 w-7 inline-block"></div>
+                     )}
                   </TableCell>
                 </TableRow>
               ))
