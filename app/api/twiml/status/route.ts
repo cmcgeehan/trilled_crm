@@ -124,7 +124,7 @@ async function processTwimlUpdate(
       const fromNumber = formData.get('From') as string || callRecord.from_number;
       const toNumber = formData.get('Called') as string || callRecord.to_number;
 
-      console.log(`[processTwimlUpdate] Processing ${targetCallSid} with status ${callStatus}. From: ${fromNumber}, To: ${toNumber}, Client: ${client}`);
+      console.log(`[processTwimlUpdate] Call SID: ${targetCallSid}, Received Status: ${callStatus}, Received RecordingURL: ${recordingUrl}`);
 
       // Prepare update data
       const updateData: CallUpdate = {
@@ -163,20 +163,28 @@ async function processTwimlUpdate(
 
       // Add completion data
       if (callStatus === 'completed') {
+          console.log(`[processTwimlUpdate] Status is 'completed' for SID: ${targetCallSid}. Applying completion data.`);
           if (callDuration) updateData.duration = parseInt(callDuration, 10);
-          if (recordingUrl) updateData.recording_url = recordingUrl;
-          // Cannot update recording_sid if it doesn't exist in CallUpdate type
+          if (recordingUrl) {
+              console.log(`[processTwimlUpdate] RecordingUrl found: ${recordingUrl}. Adding to updateData.`);
+              updateData.recording_url = recordingUrl;
+          } else {
+              console.log(`[processTwimlUpdate] No RecordingUrl received in this callback for SID: ${targetCallSid}.`);
+          }
       }
 
       // Perform the update
-      console.log(`Updating call ${callRecord.id} (SID: ${targetCallSid}) with data:`, updateData);
+      console.log(`[processTwimlUpdate] Preparing to update call ${callRecord.id} (SID: ${targetCallSid}) with data:`, JSON.stringify(updateData, null, 2));
+
       const { error: updateError } = await supabase
           .from('calls')
           .update(updateData)
           .eq('call_sid', targetCallSid);
 
       if (updateError) {
-          console.error(`Error updating call record ${callRecord.id} for SID ${targetCallSid}:`, updateError);
+          console.error(`[processTwimlUpdate] Error updating call record ${callRecord.id} for SID ${targetCallSid}:`, JSON.stringify(updateError, null, 2));
+      } else {
+          console.log(`[processTwimlUpdate] Successfully updated call record ${callRecord.id} (SID: ${targetCallSid})`);
       }
 
       // Create Communication Record if completed
