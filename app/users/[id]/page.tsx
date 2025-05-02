@@ -5,8 +5,7 @@ import { useSearchParams, useRouter, useParams } from "next/navigation"
 import Link from "next/link"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Button } from "@/components/ui/button"
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
-import { Play, Calendar, ChevronLeft, ChevronRight, Check, PhoneOutgoing } from "lucide-react"
+import { Play, Calendar, ChevronLeft, ChevronRight, Check, PhoneOutgoing, PhoneIncoming } from "lucide-react"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
 import { Input } from "@/components/ui/input"
@@ -67,13 +66,17 @@ type Case = {
 }
 
 type Interaction = {
-  type: string
-  date: string
-  content: string
-  sender: 'customer' | 'agent'
-  duration?: string
-  recordingUrl?: string
-  agentName?: string
+  id: string;
+  type: 'internal' | 'email' | 'sms' | 'call' | 'meeting' | 'tour';
+  date: string;
+  content: string;
+  sender: 'customer' | 'agent';
+  duration?: string;
+  recordingUrl?: string;
+  agentName?: string;
+  direction?: string | null;
+  callStatus?: string;
+  createdAt: Date;
 }
 
 type FormData = {
@@ -515,19 +518,69 @@ export default function CustomerDetailPage() {
 
       if (commsError) throw commsError
 
-      // Create a case with the internal notes
+      // Load calls associated with the user
+      const { data: callsData, error: callsError } = await supabase
+        .from('calls')
+        .select('*')
+        .or(`from_user_id.eq.${id},to_user_id.eq.${id}`)
+        .order('created_at', { ascending: true })
+
+      if (callsError) throw callsError
+      console.log('[loadCustomer] Fetched callsData:', JSON.stringify(callsData, null, 2)); // Log fetched calls
+
+      // Map communications to Interaction type
+      const communicationInteractions: Interaction[] = (communications || []).map(comm => ({
+        id: `comm-${comm.id}`,
+        type: 'internal',
+        date: format(new Date(comm.created_at), 'MMM d, yyyy h:mm a'),
+        content: comm.content || '',
+        sender: 'agent', // Internal notes are always agent-initiated in this context
+        agentName: agents.find(a => a.id === comm.agent_id)?.first_name || comm.from_address || 'System',
+        createdAt: new Date(comm.created_at),
+        // Call specific fields are undefined
+        duration: undefined,
+        recordingUrl: undefined,
+        direction: null,
+        callStatus: undefined,
+      }));
+      console.log('[loadCustomer] Mapped callInteractions:', JSON.stringify(communicationInteractions, null, 2)); // Log mapped communications
+
+      // Map calls to Interaction type
+      const callInteractions: Interaction[] = (callsData || []).map(call => {
+        const callCreatedAt = call.created_at || call.started_at || new Date().toISOString(); // Ensure we have a date
+        const isOutbound = call.direction === 'outbound';
+        // Determine agent based on direction (assuming from_user_id is agent for outbound)
+        const agentId = isOutbound ? call.from_user_id : null; // Need a reliable way for inbound agent ID
+        const agent = agents.find(a => a.id === agentId);
+        
+        return {
+          id: `call-${call.id}`,
+          type: 'call',
+          date: format(new Date(callCreatedAt), 'MMM d, yyyy h:mm a'),
+          content: `Call ${call.direction || 'N/A'} ${isOutbound ? 'to' : 'from'} ${isOutbound ? call.to_number : call.from_number}`,
+          sender: isOutbound ? 'agent' : 'customer', // Assumption: outbound initiated by agent, inbound by customer
+          agentName: agent?.first_name || (isOutbound ? 'Agent' : undefined), // Placeholder if agent not found on outbound
+          duration: call.duration ? `${call.duration}s` : undefined,
+          recordingUrl: call.recording_url || undefined,
+          direction: call.direction,
+          callStatus: call.status,
+          createdAt: new Date(callCreatedAt),
+        };
+      });
+      console.log('[loadCustomer] Mapped callInteractions:', JSON.stringify(callInteractions, null, 2)); // Log mapped calls
+
+      // Combine and sort all interactions
+      const allInteractions = [...communicationInteractions, ...callInteractions]
+        .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
+      console.log('[loadCustomer] Combined allInteractions:', JSON.stringify(allInteractions, null, 2)); // Log combined list
+
+      // Create a case with the combined interactions
       const mockCase: Case = {
-        id: 1,
-        status: "New",
-        createdAt: new Date().toISOString(),
-        type: "Sales",
-        interactions: (communications || []).map(comm => ({
-          type: 'internal',
-          date: format(new Date(comm.created_at), 'MMM d, yyyy h:mm a'),
-          content: comm.content || '',
-          sender: 'agent',
-          agentName: comm.from_address ?? undefined
-        }))
+        id: 1, // Use a more stable ID if multiple cases are possible
+        status: customerObject.status || "New", // Use customer status?
+        createdAt: customerObject.created_at || new Date().toISOString(),
+        type: "General", // Or derive from interactions?
+        interactions: allInteractions
       }
       setCases([mockCase])
       setActiveCase(mockCase)
@@ -540,7 +593,7 @@ export default function CustomerDetailPage() {
     } finally {
       setLoading(false)
     }
-  }, [id, loadFollowUps, currentUserRole])
+  }, [id, loadFollowUps, currentUserRole, agents]) // Added agents to dependency array
 
   const loadReferringUsers = useCallback(async () => {
     try {
@@ -646,13 +699,83 @@ export default function CustomerDetailPage() {
 
     const channel = setupSubscription()
 
+    // ---- NEW: Set up real-time subscription for calls ----
+    let callRetryCount = 0;
+    const maxCallRetries = 3;
+    const callRetryDelay = 5000; 
+    let callRetryTimeout: NodeJS.Timeout | null = null;
+
+    const setupCallSubscription = () => {
+      const callChannel = supabase
+        .channel(`calls-${id}-${Date.now()}`) // Unique channel name for calls
+        .on(
+          'postgres_changes',
+          {
+            event: '*', 
+            schema: 'public',
+            table: 'calls',
+            filter: `or=(from_user_id.eq.${id},to_user_id.eq.${id})` // Filter for user's calls
+          },
+          (payload) => {
+            console.log('Received call change:', payload)
+            loadCustomer() // Reload all data when calls change
+          }
+        )
+        .subscribe((status, err) => {
+          console.log('[Calls] Subscription status:', status)
+          
+          if (err) {
+            console.error('[Calls] Subscription error:', err)
+          }
+
+          if (status === 'SUBSCRIBED') {
+            console.log('[Calls] Successfully subscribed to calls changes')
+            callRetryCount = 0 // Reset retry count
+          }
+
+          if (status === 'TIMED_OUT' || status === 'CHANNEL_ERROR') {
+            console.error(`[Calls] Subscription ${status}:`, err)
+            
+            if (callRetryCount < maxCallRetries) {
+              callRetryCount++;
+              console.log(`[Calls] Retrying subscription (attempt ${callRetryCount}/${maxCallRetries})...`);
+              
+              if (callRetryTimeout) clearTimeout(callRetryTimeout);
+              
+              callRetryTimeout = setTimeout(() => {
+                callChannel.unsubscribe(); // Unsubscribe before retry
+                setupCallSubscription();
+              }, callRetryDelay * Math.pow(2, callRetryCount - 1)); 
+            } else {
+              console.error('[Calls] Max retries reached, subscription failed')
+            }
+          }
+
+          if (status === 'CLOSED') {
+            console.log('[Calls] Subscription closed')
+          }
+        })
+      
+      return callChannel;
+    }
+
+    const callChannel = setupCallSubscription();
+    // ---- END NEW ----
+
     // Cleanup subscription and any pending retries on unmount
     return () => {
-      console.log('Cleaning up subscription')
+      console.log('Cleaning up subscriptions')
       if (retryTimeout) {
         clearTimeout(retryTimeout)
       }
       channel.unsubscribe()
+
+      // ---- NEW: Cleanup call subscription ----
+      if (callRetryTimeout) {
+        clearTimeout(callRetryTimeout);
+      }
+      callChannel.unsubscribe();
+      // ---- END NEW ----
     }
   }, [id, loadCustomer, loadCompanies, loadReferringUsers, loadAgents])
 
@@ -738,11 +861,13 @@ export default function CustomerDetailPage() {
         // Update the UI by adding the new note to the active case
         if (activeCase) {
           const newInteraction: Interaction = {
+            id: `comm-${Date.now()}`, // Temporary ID for UI update
             type: 'internal',
             date: format(new Date(), 'MMM d, yyyy h:mm a'),
             content: responseMessage.trim(),
             sender: 'agent',
-            agentName: session.user.email || ''
+            agentName: session.user.email || '',
+            createdAt: new Date() // Add creation timestamp
           }
 
           setActiveCase(prev => prev ? {
@@ -846,11 +971,13 @@ export default function CustomerDetailPage() {
           // Update the UI
           if (activeCase) {
             const newInteraction: Interaction = {
+              id: `email-${Date.now()}`, // Temporary ID for UI update
               type: 'email',
               date: format(new Date(), 'MMM d, yyyy h:mm a'),
               content: responseMessage.trim(),
               sender: 'agent',
-              agentName: session.user.email || ''
+              agentName: session.user.email || '',
+              createdAt: new Date() // Add creation timestamp
             }
 
             setActiveCase(prev => prev ? {
@@ -1805,33 +1932,42 @@ export default function CustomerDetailPage() {
                 <div className="bg-white p-6 rounded-lg shadow">
                   <h2 className="text-lg font-semibold mb-4">Conversation History</h2>
                   <div className="space-y-4 max-h-[800px] overflow-y-auto bg-gray-50 p-4 rounded-lg">
-                    {activeCase.interactions.map((interaction: Interaction, index: number) => {
+                    {activeCase.interactions.map((interaction: Interaction) => {
+                      // Determine alignment based on sender
+                      const alignmentClass = interaction.sender === "agent" ? "justify-end" : "justify-start";
+
                       return (
-                        <div
-                          key={index}
-                          className={`flex ${interaction.sender === "agent" ? "justify-end" : "justify-start"}`}
-                        >
-                          {interaction.type === "call" ? (
-                            <div className="bg-gray-100 p-3 rounded-lg max-w-[80%]">
-                              <div className="flex items-center space-x-2">
-                                <Avatar>
-                                  <AvatarImage src="/placeholder-avatar.jpg" alt="Agent" />
-                                  <AvatarFallback>AG</AvatarFallback>
-                                </Avatar>
-                                <div>
-                                  <p className="font-semibold">Call on {interaction.date}</p>
-                                  <p>{interaction.content}</p>
-                                  {interaction.duration && <p>Duration: {interaction.duration}</p>}
-                                </div>
+                        <div key={interaction.id} className={`flex ${alignmentClass}`}>
+                          {interaction.type === 'call' ? (
+                            // ** Call Rendering Block **
+                            <div className={`p-3 rounded-lg max-w-[80%] space-y-1 shadow-sm ${interaction.sender === 'agent' ? 'bg-green-100 border border-green-200' : 'bg-purple-100 border border-purple-200'}`}>
+                              <p className="text-xs text-gray-600 mb-1 flex items-center gap-1">
+                                {interaction.direction === 'inbound' ? <PhoneIncoming className="h-3 w-3 text-purple-700"/> : <PhoneOutgoing className="h-3 w-3 text-green-700"/>}
+                                <span className="font-medium">{interaction.date}</span>
+                                <span className="font-semibold capitalize ml-1"> - {interaction.direction} Call</span>
+                                {interaction.agentName && interaction.sender === 'agent' && (
+                                  <span className="ml-auto text-right font-medium"> (Agent: {interaction.agentName})</span>
+                                )}
+                              </p>
+                              <p className="text-sm text-gray-800">{interaction.content}</p>
+                              <div className="flex justify-between items-center text-xs text-gray-600 pt-1 gap-4">
+                                <span>Status: <Badge variant="secondary" className="text-xs capitalize">{interaction.callStatus || '-'}</Badge></span>
+                                {interaction.duration && <span>Duration: {interaction.duration}</span>}
                               </div>
                               {interaction.recordingUrl && (
-                                <Button variant="outline" size="sm" className="mt-2">
-                                  <Play className="mr-2 h-4 w-4" /> Play Recording
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  className="mt-2 w-full justify-center text-xs bg-white hover:bg-gray-50"
+                                  onClick={() => window.open(interaction.recordingUrl, '_blank')}
+                                >
+                                  <Play className="mr-1 h-3 w-3" /> Play Recording
                                 </Button>
                               )}
                             </div>
                           ) : (
-                            <div className="space-y-1">
+                            // ** Existing Rendering for Notes/Email/SMS **
+                            <div className="space-y-1 max-w-[80%]">
                               {interaction.sender === "customer" && (
                                 <p className="text-xs text-gray-500">
                                   {interaction.type === "email"
@@ -1848,23 +1984,25 @@ export default function CustomerDetailPage() {
                                     ? "Email"
                                     : interaction.type === "sms"
                                       ? "SMS"
-                                      : interaction.type}
+                                      : interaction.type === "internal"
+                                        ? "Internal Note"
+                                        : interaction.type}
                                 </p>
                               )}
                               <div
-                                className={`p-3 rounded-lg max-w-[80%] ${
+                                className={`p-3 rounded-lg shadow-sm ${
                                   interaction.type === "internal"
-                                    ? "bg-yellow-100 w-full"
+                                    ? "bg-yellow-100 border border-yellow-200 w-full" // Keep internal full width and distinct
                                     : interaction.sender === "agent"
-                                      ? "bg-blue-100"
-                                      : "bg-gray-100"
+                                      ? "bg-blue-100 border border-blue-200" // Agent messages
+                                      : "bg-gray-100 border border-gray-200" // Customer messages
                                 }`}
                               >
-                                <p className="text-sm text-gray-500 mb-1">
+                                <p className="text-xs text-gray-500 mb-1">
                                   {interaction.date}
                                   {interaction.type === "internal" && " - Internal Note"}
                                 </p>
-                                <p>{interaction.content}</p>
+                                <p className="text-sm text-gray-800">{interaction.content}</p>
                               </div>
                             </div>
                           )}
