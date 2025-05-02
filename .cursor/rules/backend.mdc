@@ -1,10 +1,6 @@
 ---
 description: Backend development standards and patterns
-globs: ["**/api/**/*.{ts,js}", "**/services/**/*.{ts,js}", "**/lib/**/*.{ts,js}"]
-alwaysApply: true
----
----
-description: Backend development standards and patterns
+globs: 
 alwaysApply: true
 ---
 
@@ -91,27 +87,8 @@ When a call comes in, the system:
    - Sets initial status as 'ringing'
    - Forwards the call to all available group members
 
-##### 2. Status Callback Handling (`/api/twiml/status/route.ts` and `/api/twilio/status/route.ts`)
-Twilio sends status updates (initiated, ringing, answered, completed, etc.) to these webhook endpoints. The request payload includes `CallSid` and potentially `ParentCallSid`.
-
-###### Callback Processing Logic:
-1.  **Identify Target Record:** The system attempts to find the relevant call record in the `calls` table:
-    *   First, it queries using the `CallSid` from the payload.
-    *   If no record is found and `ParentCallSid` is present in the payload, it queries using the `ParentCallSid`.
-    *   If neither query finds a matching record, an error is logged, and the process stops for that callback (though Twilio still receives an acknowledgment).
-2.  **Update Found Record:** If a record is found (either via `CallSid` or `ParentCallSid`), that *specific* record is updated:
-    *   The `status` field is updated to match the `CallStatus` from the payload.
-    *   If the status is `answered` and the payload includes a `client` identifier (for Twilio Client calls), the system looks up the corresponding user ID and updates the `to_user_id` field on the call record.
-    *   If the status is `completed`, the `duration`, `recording_url`, etc., are added to the call record.
-3.  **Create Communication Record:**
-    *   A record is added to the `communications` table *only* when the `CallStatus` is `completed`.
-    *   The communication record is created based on the final data of the *found and updated* call record (the one identified in step 1 and updated in step 2).
-    *   The `agent_id` and `user_id` for the communication record are determined based on the call direction and the user IDs present in the updated call record.
-
-###### Key Implications:
-*   Status updates (like duration, recordings, answering user) are always applied to the specific call record found via the SID lookup (direct or parent).
-*   Communication records are generated based on the outcome of the *found* call, linking the communication log to the call record that was actually updated with completion details.
-*   This handles scenarios where initial callbacks might refer to a parent SID, while later callbacks (like 'answered' or 'completed' for a specific agent leg) refer to the child SID.
+##### 2. Status Callback Handling (`/api/twiml/status/route.ts`)
+The system receives status updates for both parent and child calls:
 
 ###### Status Updates
 - `initiated`/`ringing`: Updates the call record status
@@ -182,6 +159,56 @@ Twilio sends status updates (initiated, ringing, answered, completed, etc.) to t
 - Child calls represent the actual answered call
 - Communication records are only created for child calls
 - Recording URLs and durations are stored in child call records
+
+#### Outbound Call Flow (Click-to-Dial)
+
+Outbound calls are initiated from the frontend (e.g., user pages) via a click-to-dial mechanism.
+
+1.  **Trigger (Frontend):**
+    *   A user (agent) clicks a "Call" button, typically associated with a contact's phone number (e.g., in `app/users/page.tsx` or `app/users/[id]/page.tsx`).
+    *   The button's `onClick` handler **does not** directly initiate the call. Instead, it emits an `initiate-call` event using a global event emitter (`@/lib/event-emitter`).
+    *   The event payload includes `{ phoneNumber: string, contactInfo?: { id?: string, name?: string } }`.
+
+2.  **Event Listener (`PhoneHUD`):**
+    *   The `PhoneHUD` component (`components/phone/phone-hud.tsx`) listens for the `initiate-call` event.
+    *   The `handleInitiateCallEvent` handler checks agent availability (`status !== AgentStatus.AVAILABLE`) and if already on a call (`activeCall || incomingCall`). If unavailable, it shows a toast error and stops.
+    *   If available, it calls the `makeCallFromEvent` function within `PhoneHUD`.
+
+3.  **Call Initiation (`PhoneHUD.makeCallFromEvent`):**
+    *   Checks if the `VoiceService` is ready.
+    *   Formats the `numberToCall` to E.164 format (e.g., `+1XXXXXXXXXX`).
+    *   Updates the agent's status to `BUSY` locally (`setStatus`) and syncs this to the backend (`syncAgentStatusWithBackend`).
+    *   Calls `voiceService.current.makeCall(formattedNumber)`.
+
+4.  **`VoiceService.makeCall`:**
+    *   The `VoiceService` class (`services/voice.service.ts`) uses the initialized Twilio Device SDK.
+    *   It calls `this.device.connect({ To: formattedNumber })`. This tells Twilio to initiate an outbound call leg from the agent's client to the specified number.
+    *   The `VoiceService` returns the `Connection` object provided by the SDK.
+
+5.  **Twilio Backend Interaction:**
+    *   When `device.connect()` is called, Twilio makes a `POST` request to the TwiML Application's Voice URL configured for *outbound* calls. This is currently set to `/api/twiml/outbound`.
+    *   The `/api/twiml/outbound/route.ts` `POST` handler receives this request.
+    *   It extracts the `To` number from the request body.
+    *   It generates a TwiML `VoiceResponse` containing a `<Dial>` verb.
+    *   The `<Dial>` verb instructs Twilio to bridge the agent's client call leg with an outbound call to the `To` number, using the `callerId` configured via `process.env.TWILIO_PHONE_NUMBER`.
+    *   Crucially, it sets the `action` attribute on the `<Dial>` verb to `/api/twilio/status`. This ensures Twilio sends status updates for the *outbound* call leg to our status webhook.
+    *   The TwiML response is returned to Twilio.
+
+6.  **Frontend Call State Management (`PhoneHUD`):**
+    *   The `makeCallFromEvent` function attaches listeners (`on('accept')`, `on('ringing')`, `on('disconnect')`, `on('error')`) to the `Connection` object returned by `voiceService.current.makeCall`.
+    *   These listeners update the frontend state (`activeCall`, `callDurationSeconds`, etc.) based on the call's progress.
+    *   The `error` and `disconnect` listeners eventually call `handleCallEnd`.
+
+7.  **Status Callbacks (Backend):**
+    *   As the outbound call progresses (ringing, answered, completed), Twilio sends `POST` requests to the `statusCallback` URL specified in the TwiML (`/api/twilio/status`).
+    *   The `/api/twilio/status/route.ts` handler processes these updates, similar to inbound calls, updating the `calls` table record associated with the `CallSid`.
+
+8.  **Call Logging (`PhoneHUD.handleCallEnd`):**
+    *   When the call ends (either via user action triggering `disconnect` or an error), `handleCallEnd` is called in the `PhoneHUD`.
+    *   It cleans up local state (`cleanupCallState`).
+    *   It sets the agent status to `WRAP_UP` (if they were `BUSY`).
+    *   It inserts the final call details (duration, status, direction='outbound', agent ID, external user ID if found) into the `calls` table.
+    *   It creates a corresponding record in the `communications` table.
 
 ## Database
 
@@ -399,6 +426,11 @@ function isUser(data: unknown): data is User {
   return (
     typeof data === 'object' &&
     data !== null &&
+    'id' in data &&
+    'email' in data
+  );
+}
+``` 
     'id' in data &&
     'email' in data
   );

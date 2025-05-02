@@ -221,11 +221,37 @@ export async function POST(request: Request) {
       const availableUserIds = availableUsers?.map((user: { user_id: string }) => user.user_id) || [];
       console.log('Available user IDs:', availableUserIds);
       
-      // If no users are available, play a message and hang up
+
+
+      console.log(`[TwiML Inbound] Fetched group ${group.id}. Fetching member details...`);
+
+      // Create a base TwiML response
+      const twiml = new VoiceResponse();
+
+      // If no users are available, try dialing cell phones sequentially
       if (availableUserIds.length === 0) {
-        console.log('No available users found');
-        const twiml = new VoiceResponse();
-        twiml.say('No one is available to take your call right now. Please try again later.');
+        console.log('No available CRM agents found, attempting sequential dial.');
+
+        // Instead of dialing here, redirect to the sequential dial handler
+        // Need the parent CallSid and the original called number (group number)
+        const parentCallSid = formData.get('CallSid') as string;
+        const groupTwilioNumber = calledNumber; // Already have this from earlier in the function
+        
+        const redirectUrl = `/api/twiml/sequential-dial?groupId=${group.id}&callSid=${parentCallSid}&fromNumber=${encodeURIComponent(fromNumber)}&dialIndex=0&groupNumber=${encodeURIComponent(groupTwilioNumber)}`;
+        
+        console.log(`Redirecting to sequential dial: ${redirectUrl}`);
+        twiml.redirect({ method: 'POST' }, redirectUrl);
+
+        // Update the initial call record status to indicate redirection
+        // Note: The sequential dialer might update this further.
+        await supabase
+          .from('calls')
+          .update({ status: 'redirecting-to-sequential' }) 
+          .eq('call_sid', parentCallSid);
+          // Consider if the initial insert needs modification too, or if this update is sufficient.
+          // We might still need the initial insert from before this block.
+
+        // No need to dial or create another call record here, the redirect handles it.
         return new NextResponse(twiml.toString(), {
           headers: {
             'Content-Type': 'text/xml; charset=utf-8',
@@ -234,7 +260,9 @@ export async function POST(request: Request) {
         });
       }
 
-      // Create call record for group call
+      // --- Agents are available ---
+
+      // Create call record for group call (parent call)
       const { error: callError } = await supabase
         .from('calls')
         .insert({
@@ -251,38 +279,39 @@ export async function POST(request: Request) {
         console.error('Error creating call record:', callError);
       }
 
-      // Create TwiML response for group call
-      const twiml = new VoiceResponse();
-      
+      // Generate TwiML to dial available agents
+      // const twiml = new VoiceResponse(); // Moved up
+
       // Add recording announcement
       twiml.say({
         voice: 'Polly.Amy',
         language: 'en-US'
       }, 'This call may be recorded for quality assurance purposes.');
-      
-      // Create a SINGLE Dial verb to simultaneously ring all available users
+
       const dial = twiml.dial({
         answerOnBridge: true,
-        callerId: fromNumber,
-        timeout: 30,
-        record: 'record-from-answer',
-        action: `/api/twilio/status?fromNumber=${encodeURIComponent(fromNumber)}`, // Correct action URL for the main Dial
+        callerId: fromNumber, // Or group.twilio_phone?
+        timeout: 8, // Ring agents for 8 seconds
+        record: 'record-from-answer', // Keep recording if needed
+        // Action points to the new handler, passing necessary info
+        action: `/api/twiml/handle-group-dial-status?groupId=${group.id}&callSid=${formData.get('CallSid')}&fromNumber=${encodeURIComponent(fromNumber)}&calledNumber=${encodeURIComponent(calledNumber)}`,
         method: 'POST'
       });
 
-      // Add a <Client> noun inside the single <Dial> for each available user
-      availableUserIds.forEach(userId => {
-        console.log('Adding client to dial:', userId);
+      // Dial available agents via VOIP client
+      availableUserIds.forEach((userId) => {
+        console.log('Adding available agent client to dial:', userId);
+        // Status callback for *individual* agent legs still goes to the main status handler
         dial.client({
-          statusCallbackEvent: ['initiated', 'ringing', 'answered', 'completed'],
-          statusCallback: `/api/twilio/status?fromNumber=${encodeURIComponent(fromNumber)}`, // Correct callback URL
-          statusCallbackMethod: 'POST'
+           statusCallbackEvent: ['initiated', 'ringing', 'answered', 'completed'],
+           statusCallback: `/api/twilio/status?fromNumber=${encodeURIComponent(fromNumber)}`, // Keep original status handler for individual legs
+           statusCallbackMethod: 'POST'
         }, userId);
       });
-      
+
       const twimlResponse = twiml.toString();
-      console.log('Generated TwiML:', twimlResponse);
-      
+      console.log('Generated TwiML for agent dial:', twimlResponse);
+
       return new NextResponse(twimlResponse, {
         headers: {
           'Content-Type': 'text/xml; charset=utf-8',

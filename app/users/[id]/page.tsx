@@ -89,7 +89,7 @@ type FormData = {
   lead_type: 'referral_partner' | 'potential_customer' | null;
   company_id: string | null;
   referrer_id: string | null;
-  referring_user_id: string | null;
+  linkedin: string | null;
 }
 
 type B2CLeadInfo = {
@@ -139,7 +139,6 @@ export default function CustomerDetailPage() {
   const [cases, setCases] = useState<Case[]>([]);
   const [responseChannel, setResponseChannel] = useState("internal");
   const [responseMessage, setResponseMessage] = useState("");
-  const [editedCustomer, setEditedCustomer] = useState<Customer | null>(null);
   const [followUps, setFollowUps] = useState<FollowUp[]>([]);
   const [selectedFollowUp, setSelectedFollowUp] = useState<FollowUp | null>(null);
   const [agents, setAgents] = useState<Agent[]>([]);
@@ -148,19 +147,19 @@ export default function CustomerDetailPage() {
   const [isEditable, setIsEditable] = useState<boolean>(false);
   const [companies, setCompanies] = useState<Database['public']['Tables']['companies']['Row'][]>([]);
   const [formData, setFormData] = useState<FormData>({
-    first_name: customer?.first_name || "",
-    last_name: customer?.last_name || "",
-    email: customer?.email || "",
-    phone: customer?.phone || "",
-    position: customer?.position || "",
-    role: customer?.role || "lead",
-    status: customer?.status || "new",
-    owner_id: customer?.owner_id || null,
-    notes: customer?.notes || "",
-    lead_type: customer?.lead_type || null,
-    company_id: customer?.company_id || null,
-    referrer_id: customer?.referring_user_id || null,
-    referring_user_id: customer?.referring_user_id || null,
+    first_name: "",
+    last_name: "",
+    email: "",
+    phone: "",
+    position: "",
+    role: "lead",
+    status: "new",
+    owner_id: null,
+    notes: "",
+    lead_type: null,
+    company_id: null,
+    referrer_id: null,
+    linkedin: null,
   });
   const [b2cLeadInfo, setB2cLeadInfo] = useState<B2CLeadInfo | null>(null);
   const [isLoadingB2CInfo, setIsLoadingB2CInfo] = useState(false);
@@ -313,16 +312,16 @@ export default function CustomerDetailPage() {
         notes: customer.notes || "",
         lead_type: customer.lead_type || null,
         company_id: customer.company_id || null,
-        referrer_id: customer.referring_user_id || null,
-        referring_user_id: customer.referring_user_id || null,
-      })
+        referrer_id: customer.referrer_id || null,
+        linkedin: customer.linkedin || null,
+      });
       
       // Load B2C lead info if this is a potential customer
       if (customer.lead_type === 'potential_customer') {
         loadB2CLeadInfo();
       }
     }
-  }, [customer, loadB2CLeadInfo])
+  }, [customer, loadB2CLeadInfo]);
 
   const loadCompanies = useCallback(async () => {
     try {
@@ -490,10 +489,10 @@ export default function CustomerDetailPage() {
           ...customerData.companies,
           name: customerData.companies.name || ''
         } : null,
+        referrer_id: customerData.referrer_id || null,
       };
 
       setCustomer(customerObject);
-      setEditedCustomer(customerObject); // Set editedCustomer with the same validated object
       
       // Set editability based on loaded customer and current user role
       if (currentUserRole && customerObject) {
@@ -876,36 +875,56 @@ export default function CustomerDetailPage() {
   }
 
   const handleSaveCustomer = async () => {
-    if (!editedCustomer || !id) return;
+    if (!customer || !id) return;
 
     setIsUpdatingFollowUps(true);
     setError(null);
+    console.log('[Save Customer] Starting save...');
+    console.log('[Save Customer] formData state:', JSON.stringify(formData));
+
     try {
-      // Prepare update data
+      // Prepare update data FROM formData
       const updateData: Partial<Database['public']['Tables']['users']['Update']> = {
-        first_name: editedCustomer.first_name,
-        last_name: editedCustomer.last_name,
-        email: editedCustomer.email,
-        phone: editedCustomer.phone,
-        position: editedCustomer.position,
-        role: editedCustomer.role,
-        status: editedCustomer.status,
-        owner_id: editedCustomer.owner_id,
-        notes: editedCustomer.notes,
-        lead_type: editedCustomer.lead_type || null, 
-        company_id: editedCustomer.company_id || null, 
+        first_name: formData.first_name,
+        last_name: formData.last_name,
+        email: formData.email,
+        phone: formData.phone,
+        position: formData.position,
+        role: formData.role,
+        status: formData.status,
+        owner_id: formData.owner_id,
+        notes: formData.notes,
+        lead_type: formData.lead_type || null,
+        company_id: formData.company_id || null,
+        referrer_id: formData.referrer_id || null,
+        linkedin: formData.linkedin || null,
       };
+
+      // Clean up empty strings to null where appropriate (optional, depends on DB constraints)
+      if (updateData.owner_id === '') updateData.owner_id = null;
+      if (updateData.company_id === '') updateData.company_id = null;
+      if (updateData.referrer_id === '') updateData.referrer_id = null;
+      if (updateData.linkedin === '') updateData.linkedin = null;
+      // Phone/email might be allowed to be empty strings?
+
+      console.log('[Save Customer] Sending updateData to Supabase:', JSON.stringify(updateData));
 
       const { data: updatedUser, error } = await supabase
         .from('users')
         .update(updateData)
         .eq('id', id)
-        .select(`*, companies!users_company_id_fkey (id, name)`)
+        .select(`*, companies!users_company_id_fkey (id, name)`) // Re-fetch company info
         .single();
 
-      if (error) throw error;
-      
-      // Construct the updated Customer object for state
+      if (error) {
+        console.error('[Save Customer] Supabase update error:', error);
+        throw error;
+      }
+
+      console.log('[Save Customer] Received updatedUser from Supabase:', JSON.stringify(updatedUser));
+
+      // Construct the updated Customer object for the main customer state
+      // Ensure all fields used by formData are present here
       const updatedCustomerObject: Customer = {
         ...updatedUser,
         id: updatedUser.id!, 
@@ -917,23 +936,51 @@ export default function CustomerDetailPage() {
         email: updatedUser.email || '', 
         first_name: updatedUser.first_name || '', 
         last_name: updatedUser.last_name || '', 
-        created_at: updatedUser.created_at!,
-        updated_at: updatedUser.updated_at!,
+        created_at: updatedUser.created_at!, 
+        updated_at: updatedUser.updated_at!, 
+        phone: updatedUser.phone || '', 
+        position: updatedUser.position || '', 
+        owner_id: updatedUser.owner_id || null, 
+        lead_type: updatedUser.lead_type || null, 
+        referrer_id: updatedUser.referrer_id || null, 
         companies: updatedUser.companies ? {
           ...updatedUser.companies,
           name: updatedUser.companies.name || ''
         } : null,
       };
 
-      setCustomer(updatedCustomerObject);
-      setEditedCustomer(updatedCustomerObject); // Update edited state as well
+      setCustomer(updatedCustomerObject); // Update the main customer state
+
+      // Update formData directly from the received updatedUser data
+      setFormData({
+        first_name: updatedUser.first_name || "",
+        last_name: updatedUser.last_name || "",
+        email: updatedUser.email || "",
+        phone: updatedUser.phone || "",
+        position: updatedUser.position || "",
+        role: updatedUser.role as UserRole || "lead",
+        status: updatedUser.status as UserStatus || "new",
+        owner_id: updatedUser.owner_id || null,
+        notes: updatedUser.notes || "",
+        lead_type: updatedUser.lead_type || null,
+        company_id: updatedUser.company_id || null,
+        referrer_id: updatedUser.referrer_id || null,
+        linkedin: updatedUser.linkedin || null,
+      });
+
+      console.log('[Save Customer] Successfully updated customer and formData state.');
       setIsUpdatingFollowUps(false);
       toast.success('Customer details saved');
     } catch (err) {
-      console.error('Error saving customer:', err);
+      // Error already logged if it's from Supabase
+      if (!(err instanceof Error && err.message.includes('supabase'))) {
+          console.error('[Save Customer] Error during save process:', err);
+      }
       setError(err instanceof Error ? err.message : 'Failed to save customer');
+      setIsUpdatingFollowUps(false); // Ensure loading state is reset on error
     } finally {
-      setIsUpdatingFollowUps(false);
+      // Redundant due to placement in try/catch, but safe
+      // setIsUpdatingFollowUps(false);
     }
   };
 
@@ -1041,58 +1088,6 @@ export default function CustomerDetailPage() {
     }
   }
 
-  // Add this function to handle B2C lead info updates
-  const handleSaveB2CLeadInfo = async () => {
-    if (!b2cLeadInfo || !customer) return
-
-    try {
-      setIsLoadingB2CInfo(true)
-      // Explicitly define the fields to update, excluding user_id, created_*, etc.
-      const updateData: Partial<Database['public']['Tables']['b2c_lead_info']['Update']> = {
-        address: b2cLeadInfo.address,
-        gender: b2cLeadInfo.gender,
-        ssn_last_four: b2cLeadInfo.ssn_last_four,
-        marital_status: b2cLeadInfo.marital_status,
-        parental_status: b2cLeadInfo.parental_status,
-        referral_source: b2cLeadInfo.referral_source,
-        headshot_url: b2cLeadInfo.headshot_url,
-        dob: b2cLeadInfo.dob
-        // updated_by will be handled by DB triggers/policies if set up,
-        // or could be added here if needed: updated_by: currentUserId
-      };
-      
-      // Remove potentially null/undefined values before sending update
-      Object.keys(updateData).forEach(key => {
-        const typedKey = key as keyof typeof updateData;
-        if (updateData[typedKey] === undefined || updateData[typedKey] === null) {
-          // Keep null for headshot_url, otherwise use empty string or default?
-          // For now, let's keep nulls for fields that allow them
-          // and potentially filter out undefined if the DB handles defaults.
-          // Let's just send the object as is for now, assuming DB handles nulls.
-          // If DB errors occur, add more specific handling here.
-        }
-      });
-
-      const { data: updatedData, error } = await supabase
-        .from('b2c_lead_info')
-        .update(updateData) // Use the explicitly constructed object
-        .eq('user_id', customer.id)
-        .select()
-        .single()
-
-      if (error) throw error
-
-      // Ensure dob is string when updating state after save
-      setB2cLeadInfo(updatedData ? { ...updatedData, dob: updatedData.dob || '' } : null);
-      toast.success('B2C Lead Info updated')
-    } catch (err) {
-      console.error('Error saving B2C lead info:', err)
-      toast.error('Failed to save B2C Lead Info')
-    } finally {
-      setIsLoadingB2CInfo(false)
-    }
-  }
-
   if (loading) {
     return (
       <div className="flex items-center justify-center min-h-screen">
@@ -1101,7 +1096,7 @@ export default function CustomerDetailPage() {
     )
   }
 
-  if (error || !customer || !editedCustomer) {
+  if (error || !customer) {
     return (
       <div className="flex items-center justify-center min-h-screen">
         <div className="text-red-500">Error: {error || 'Customer not found'}</div>
@@ -1414,8 +1409,8 @@ export default function CustomerDetailPage() {
                         <Label htmlFor="linkedin">LinkedIn</Label>
                         <Input
                           id="linkedin"
-                          value={customer?.linkedin || ''}
-                          onChange={(e) => setEditedCustomer(prev => ({ ...prev!, linkedin: e.target.value }))}
+                          value={formData.linkedin || ''}
+                          onChange={(e) => setFormData(prev => ({ ...prev, linkedin: e.target.value }))}
                           className="mt-1"
                           disabled={!isEditable}
                         />
@@ -1449,12 +1444,11 @@ export default function CustomerDetailPage() {
                         <Label htmlFor="referring_user">Referring User</Label>
                         <div className="mt-1">
                           <Select
-                            value={formData.referring_user_id || ""}
+                            value={formData.referrer_id || ""}
                             onValueChange={(value) => {
                               setFormData(prev => ({ 
                                 ...prev, 
-                                referring_user_id: value,
-                                referrer_id: value
+                                referrer_id: value,
                               }))
                             }}
                           >
@@ -1723,33 +1717,30 @@ export default function CustomerDetailPage() {
                 <>
                   <Button variant="outline" onClick={() => {
                     setFormData({
-                      first_name: customer?.first_name || "",
-                      last_name: customer?.last_name || "",
-                      email: customer?.email || "",
-                      phone: customer?.phone || "",
-                      position: customer?.position || "",
-                      role: customer?.role || "lead",
-                      status: customer?.status || "new",
-                      owner_id: customer?.owner_id || null,
-                      notes: customer?.notes || "",
-                      lead_type: customer?.lead_type || null,
-                      company_id: customer?.company_id || null,
-                      referrer_id: customer?.referring_user_id || null,
-                      referring_user_id: customer?.referring_user_id || null,
+                      first_name: customer.first_name || "",
+                      last_name: customer.last_name || "",
+                      email: customer.email || "",
+                      phone: customer.phone || "",
+                      position: customer.position || "",
+                      role: customer.role || "lead",
+                      status: customer.status || "new",
+                      owner_id: customer.owner_id || null,
+                      notes: customer.notes || "",
+                      lead_type: customer.lead_type || null,
+                      company_id: customer.company_id || null,
+                      referrer_id: customer.referrer_id || null,
+                      linkedin: customer.linkedin || null,
                     });
-                    if (customer?.lead_type === 'potential_customer') {
+                    if (customer.lead_type === 'potential_customer') {
                       loadB2CLeadInfo();
                     }
-                  }}>
+                  }} disabled={loading}>
                     Reset Changes
                   </Button>
                   <Button onClick={() => {
                     handleSaveCustomer();
-                    if (customer?.lead_type === 'potential_customer') {
-                      handleSaveB2CLeadInfo();
-                    }
-                  }} disabled={loading}>
-                    {loading ? 'Saving...' : 'Save Changes'}
+                  }} disabled={loading || isUpdatingFollowUps}>
+                    {isUpdatingFollowUps ? 'Saving...' : 'Save Changes'}
                   </Button>
                   <Button variant="destructive" onClick={handleMarkAsLost}>
                     Mark as Lost

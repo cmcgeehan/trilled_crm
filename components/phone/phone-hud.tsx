@@ -42,6 +42,7 @@ interface BaseCall {
 interface ActiveCall extends BaseCall, Pick<TwilioConnectionLike, 'disconnect' | 'on'> {
   startTime: Date;
   recordingUrl?: string;
+  targetNumber?: string;
 }
 
 export function PhoneHUD() {
@@ -133,7 +134,6 @@ export function PhoneHUD() {
     const callEndedTime = new Date();
     const endedCall = activeCallRef.current; 
     const endedInboundInfo = incomingCallInfo; 
-    const endedPhoneNumber = phoneNumber; 
 
     await cleanupCallState(); 
     if (statusRef.current === AgentStatus.BUSY) {
@@ -147,23 +147,59 @@ export function PhoneHUD() {
       const agentUserId = session.user.id;
 
       const isInbound = !!endedInboundInfo;
-      const externalPhoneNumber = isInbound ? endedInboundInfo?.callerNumber : endedPhoneNumber;
+      const externalPhoneNumber = isInbound ? endedInboundInfo?.callerNumber : endedCall?.targetNumber;
       const agentPhoneNumber = process.env.NEXT_PUBLIC_TWILIO_PHONE_NUMBER || 'your_agent_twilio_number'; 
 
+      // --- Lookup External User ID *before* creating call data ---
+      let externalUserId: string | null = null;
+      if (externalPhoneNumber) {
+         // Use the number relevant to the external party
+         const numberToLookup = isInbound ? (endedInboundInfo?.callerNumber || '') : (endedCall?.targetNumber || '');
+         if (numberToLookup) {
+             console.log(`[HUD handleCallEnd] Looking up external user for number: ${numberToLookup}`);
+             const normalizedNumber = numberToLookup.replace(/\D/g, '');
+             // Adjust lookup logic if needed (e.g., different table or formatting)
+             const { data: externalUsers, error: userLookupError } = await supabase
+                 .from('users') // Assuming external contacts are in 'users'
+                 .select('id')
+                 .or(`phone.eq.${normalizedNumber},phone.eq.+${normalizedNumber}`)
+                 .limit(1);
+             
+             if (userLookupError) {
+                console.error(`[HUD handleCallEnd] Error looking up user by phone ${numberToLookup}:`, userLookupError);
+             } else if (externalUsers && externalUsers.length > 0) {
+                externalUserId = externalUsers[0].id;
+                console.log(`[HUD handleCallEnd] Found external user ${externalUserId} for number ${numberToLookup}`);
+             } else {
+                console.log(`[HUD handleCallEnd] No external user found for number ${numberToLookup}`);
+             }
+         } else {
+            console.warn('[HUD handleCallEnd] Cannot lookup external user: Relevant phone number is missing.');
+         }
+      } else {
+         console.warn('[HUD handleCallEnd] Cannot lookup external user: External phone number is missing.');
+      }
+      // --- End External User ID Lookup ---
+
       const duration = endedCall?.startTime ? Math.floor((callEndedTime.getTime() - endedCall.startTime.getTime()) / 1000) : 0;
+
+      // Provide empty string fallbacks for potentially undefined numbers
+      const fromNum = isInbound ? (externalPhoneNumber || '') : (agentPhoneNumber || '');
+      const toNum = isInbound ? (agentPhoneNumber || '') : (externalPhoneNumber || '');
 
       const callInsertData = {
         call_sid: callSid,
         status: finalStatus,
-        from_number: isInbound ? externalPhoneNumber : agentPhoneNumber,
-        to_number: isInbound ? agentPhoneNumber : externalPhoneNumber,
-        from_user_id: isInbound ? null : agentUserId,
-        to_user_id: isInbound ? agentUserId : null,
+        from_number: fromNum, 
+        to_number: toNum, 
+        // Set IDs based on direction, now that FK constraint is removed
+        from_user_id: isInbound ? null : agentUserId, // Agent for outbound
+        to_user_id: isInbound ? agentUserId : externalUserId, // External user for outbound, Agent for inbound
         duration: duration >= 0 ? duration : 0,
         updated_at: callEndedTime.toISOString(),
-        start_time: endedCall?.startTime?.toISOString(),
+        started_at: endedCall?.startTime?.toISOString(),
         ended_at: callEndedTime.toISOString(),
-        recording_url: endedCall?.recordingUrl,
+        recording_url: endedCall?.recordingUrl, // Still likely null from frontend
       };
 
       console.log('[HUD] Inserting call record:', callInsertData);
@@ -176,14 +212,6 @@ export function PhoneHUD() {
       if (createError) throw createError;
       if (!newCall) throw new Error('Failed to create call record');
       console.log('[HUD] Call record created:', newCall.id);
-
-      let externalUserId: string | null = null;
-      if (externalPhoneNumber) {
-         const normalizedNumber = externalPhoneNumber.replace(/\D/g, '');
-         const numberWithoutCountryCode = normalizedNumber.length > 10 ? normalizedNumber.substring(normalizedNumber.length - 10) : normalizedNumber;
-         const { data: externalUsers } = await supabase.from('users').select('id').or(`phone.eq.${numberWithoutCountryCode}`).limit(1);
-         externalUserId = externalUsers?.[0]?.id ?? null;
-      }
 
       const communicationData = {
         communication_type: 'call',
@@ -206,7 +234,7 @@ export function PhoneHUD() {
       console.error('[HUD] Error in handleCallEnd recording:', error as Error);
       toast.error(`Failed to record call details: ${(error as Error).message}`);
     }
-  }, [cleanupCallState, syncAgentStatusWithBackend, incomingCallInfo, phoneNumber, formatDuration]);
+  }, [cleanupCallState, syncAgentStatusWithBackend, incomingCallInfo, formatDuration]);
 
   // Define makeCallFromEvent after its dependencies
   const makeCallFromEvent = useCallback(async (numberToCall: string, contactInfo?: { id?: string; name?: string }) => {
@@ -233,100 +261,139 @@ export function PhoneHUD() {
      await syncAgentStatusWithBackend(AgentStatus.BUSY);
  
      let confirmedCallSid: string | null = null; 
+     const dialedNumber = formattedNumber;
 
      try {
-       const connection = await voiceService.current.makeCall(formattedNumber); 
+       const connection = await voiceService.current.makeCall(dialedNumber); 
        
+       // Use a ref to track if handleCallEnd has been called for this connection
+       const callEndHandledRef = { current: false };
+
        const handleDisconnect = async () => { 
-         const sidToUse = confirmedCallSid || activeCallRef.current?.sid; 
-         if (sidToUse && confirmedCallSid) { 
-           console.log(`[HUD] Outgoing call ${sidToUse} disconnected normally.`);
+         // Use the SID captured during setup, fall back to active call ref only if necessary
+         const sidToUse = confirmedCallSid || activeCallRef.current?.sid;
+         console.log(`[HUD handleDisconnect] Triggered. SID to use: ${sidToUse}, confirmedCallSid: ${confirmedCallSid}, callEndHandled: ${callEndHandledRef.current}`);
+         
+         if (callEndHandledRef.current) {
+            console.log(`[HUD handleDisconnect] Call end for SID ${sidToUse || 'unknown'} already handled. Skipping.`);
+            return;
+         }
+
+         if (sidToUse) { 
+           console.log(`[HUD handleDisconnect] Outgoing call ${sidToUse} disconnected normally. Calling handleCallEnd.`);
+           callEndHandledRef.current = true; // Mark as handled *before* calling
            await handleCallEnd(sidToUse);
          } else {
-           console.log(`[HUD] Disconnect event fired for ${sidToUse || 'unknown SID'}, but call was already handled (likely by error) or SID was never confirmed.`);
-           if (!sidToUse && statusRef.current === AgentStatus.BUSY) { 
+           console.log(`[HUD handleDisconnect] Disconnect event fired, but no reliable SID found (confirmed: ${confirmedCallSid}, activeRef: ${activeCallRef.current?.sid}). Attempting cleanup.`);
+           // If we were busy but have no SID, transition to wrap-up and cleanup
+           if (statusRef.current === AgentStatus.BUSY) { 
                 setStatus(AgentStatus.WRAP_UP);
                 await syncAgentStatusWithBackend(AgentStatus.WRAP_UP);
                 await cleanupCallState();
-           } else if (!confirmedCallSid) {
+           } else {
+                // If not busy, just cleanup
                 await cleanupCallState(); 
            }
          }
        };
 
-       // Define the async logic separately
+       // Define the async logic separately for error handling
        const performErrorHandling = async (error: unknown) => {
-         const sidToUse = confirmedCallSid || activeCallRef.current?.sid; 
-         const wasAlreadyHandled = !confirmedCallSid;
-         confirmedCallSid = null; // Clear the SID as the call failed
-         if (wasAlreadyHandled) {
-             console.warn(`[HUD] Error event received for ${sidToUse || 'unknown SID'}, but call end might have already been processed.`);
-             return; // Avoid double handling
+         // Use the SID captured during setup, fall back to active call ref only if necessary
+         const sidToUse = confirmedCallSid || activeCallRef.current?.sid;
+         console.log(`[HUD performErrorHandling] Triggered. SID to use: ${sidToUse}, confirmedCallSid: ${confirmedCallSid}, callEndHandled: ${callEndHandledRef.current}`);
+         
+         if (callEndHandledRef.current) {
+            console.log(`[HUD performErrorHandling] Call end/error for SID ${sidToUse || 'unknown'} already handled. Skipping.`);
+            return; // Avoid double handling
          }
-         // Type check before accessing message
+         callEndHandledRef.current = true; // Mark as handled *before* proceeding
+
          const errorMessage = (error instanceof Error) ? error.message : 'Unknown call error'; 
-         console.error(`[HUD] Outgoing call error ${sidToUse ? `SID ${sidToUse}` : '(unknown SID)'}:`, error);
+         console.error(`[HUD performErrorHandling] Outgoing call error ${sidToUse ? `SID ${sidToUse}` : '(unknown SID)'}:`, error);
          toast.error(`Call failed: ${errorMessage}`);
+         
          if (sidToUse) {
+            console.log(`[HUD performErrorHandling] Calling handleCallEnd for failed call SID: ${sidToUse}`);
             await handleCallEnd(sidToUse, 'failed'); 
+         } else {
+            console.warn(`[HUD performErrorHandling] Error occurred but no reliable SID found. Attempting status reset and cleanup.`);
+             // Only revert status if it was BUSY due to *this* call attempt
+            if (statusRef.current === AgentStatus.BUSY) { 
+                setStatus(AgentStatus.AVAILABLE);
+                await syncAgentStatusWithBackend(AgentStatus.AVAILABLE);
+            }
+            await cleanupCallState(); // General cleanup
          }
-         // Only revert status if it was BUSY due to *this* call attempt
-         if (statusRef.current === AgentStatus.BUSY) { 
-             setStatus(AgentStatus.AVAILABLE);
-             await syncAgentStatusWithBackend(AgentStatus.AVAILABLE);
-         }
-         await cleanupCallState(); // General cleanup
        };
 
        // Create a non-async listener that calls the async logic
        const handleErrorListener = (error: unknown) => {
          console.log("[HUD] handleErrorListener triggered");
          performErrorHandling(error).catch(err => {
-           // Catch errors within the async handling itself
            console.error("[HUD] Error within performErrorHandling:", err);
-           // Perform minimal cleanup as a fallback
-           cleanupCallState().catch(cleanupErr => console.error("Error during fallback cleanup:", cleanupErr));
-           if (statusRef.current !== AgentStatus.AVAILABLE) {
-               setStatus(AgentStatus.AVAILABLE);
-               syncAgentStatusWithBackend(AgentStatus.AVAILABLE).catch(syncErr => console.error("Error during fallback status sync:", syncErr));
+           // Fallback cleanup/status update if error handling itself fails
+           if (!callEndHandledRef.current) { // Avoid cleanup if already handled
+               callEndHandledRef.current = true; // Mark handled in fallback
+               cleanupCallState().catch(cleanupErr => console.error("Error during fallback cleanup:", cleanupErr));
+               if (statusRef.current !== AgentStatus.AVAILABLE && statusRef.current !== AgentStatus.WRAP_UP) {
+                   setStatus(AgentStatus.AVAILABLE);
+                   syncAgentStatusWithBackend(AgentStatus.AVAILABLE).catch(syncErr => console.error("Error during fallback status sync:", syncErr));
+               }
            }
          });
        };
 
        const processCallSetup = (conn: TwilioConnectionLike) => {
-         if (confirmedCallSid) return; 
-         const callSid = conn.parameters.CallSid || conn.sid;
-         console.log(`[HUD] Processing call setup. SID found: ${callSid}`);
-         if (!callSid) {
-            console.error("[HUD] Call setup event fired but no SID found.", conn);
-            toast.error("Call initiation failed: Missing Call SID.");
-            if (statusRef.current === AgentStatus.BUSY) {
-                setStatus(AgentStatus.AVAILABLE);
-                syncAgentStatusWithBackend(AgentStatus.AVAILABLE);
-            }
-            cleanupCallState();
-            return;
+         // Prevent re-processing if SID is already confirmed
+         if (confirmedCallSid) {
+             console.log(`[HUD processCallSetup] Already confirmed SID ${confirmedCallSid}. Skipping.`);
+             return;
          }
-         confirmedCallSid = callSid; 
-         const newActiveCall: ActiveCall = {
-           sid: callSid,
-           status: conn.status || 'initiated',
-           parameters: conn.parameters,
-           startTime: new Date(),
-           disconnect: () => conn.disconnect(), 
-           on: (event, listener) => conn.on(event, listener),
-         };
-         setActiveCall(newActiveCall);
+         const callSid = conn.parameters.CallSid || conn.sid;
+         console.log(`[HUD processCallSetup] Event: ${conn.status}. Attempting to confirm SID. Found: ${callSid}`);
+         
+         if (!callSid) {
+            console.error("[HUD processCallSetup] Call setup event fired but no SID found.", conn);
+            // Don't trigger full error handling here, wait for potential error/disconnect event
+            // toast.error("Call initiation warning: Missing Call SID during setup.");
+            return; // Exit early, maybe SID appears later
+         }
+
+         console.log(`[HUD processCallSetup] Confirming SID as: ${callSid}`);
+         confirmedCallSid = callSid; // Set the confirmed SID
+         
+         // Update active call state if not already set by another event
+         if (!activeCallRef.current || activeCallRef.current.sid !== callSid) {
+             const newActiveCall: ActiveCall = {
+               sid: callSid,
+               status: conn.status || 'initiated',
+               parameters: conn.parameters,
+               startTime: new Date(),
+               disconnect: () => conn.disconnect(), 
+               on: (event, listener) => conn.on(event, listener),
+               targetNumber: dialedNumber
+             };
+             console.log(`[HUD processCallSetup] Setting active call state for SID: ${callSid}`);
+             setActiveCall(newActiveCall);
+         } else {
+            console.log(`[HUD processCallSetup] Active call state already exists for SID: ${callSid}.`);
+         }
+         
+         // Close dialer dialog only after SID confirmed
          setShowCallDialog(false); 
          setPhoneNumber("");
        };
 
-       connection.on('accept', processCallSetup);
+       // Attach listeners
+       connection.on('accept', (conn: TwilioConnectionLike) => {
+         console.log('[HUD Connection Event] accept');
+         processCallSetup(conn);
+       });      
        connection.on('ringing', (hasEarlyMedia: boolean) => { 
-            console.log(`[HUD] Outgoing call ringing event. Early media: ${hasEarlyMedia}`);
-            if (!confirmedCallSid) {
-                processCallSetup(connection); 
-            }
+            console.log(`[HUD Connection Event] ringing - Early media: ${hasEarlyMedia}`);
+            // Attempt setup on ringing as SID might be available now
+            processCallSetup(connection);
        });
        connection.on('disconnect', handleDisconnect);
        connection.on('error', handleErrorListener);

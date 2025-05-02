@@ -83,7 +83,7 @@ export async function POST(request: Request) {
   const dial = twiml.dial({
     callerId: callerId,
     // Consider making recording conditional based on call type or settings
-    // record: 'record-from-answer', 
+    record: 'record-from-answer',
     action: '/api/twilio/status', // Status callback URL remains the same
     method: 'POST'
   });
