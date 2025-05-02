@@ -81,6 +81,7 @@ export type Database = {
           communication_id: number | null
           created_at: string | null
           duration: number | null
+          ended_at: string | null
           from_number: string
           from_user_id: string | null
           group_id: string | null
@@ -97,6 +98,7 @@ export type Database = {
           communication_id?: number | null
           created_at?: string | null
           duration?: number | null
+          ended_at?: string | null
           from_number: string
           from_user_id?: string | null
           group_id?: string | null
@@ -113,6 +115,7 @@ export type Database = {
           communication_id?: number | null
           created_at?: string | null
           duration?: number | null
+          ended_at?: string | null
           from_number?: string
           from_user_id?: string | null
           group_id?: string | null

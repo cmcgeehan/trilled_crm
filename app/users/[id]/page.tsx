@@ -6,7 +6,7 @@ import Link from "next/link"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Button } from "@/components/ui/button"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
-import { Play, Calendar, ChevronLeft, ChevronRight, Check } from "lucide-react"
+import { Play, Calendar, ChevronLeft, ChevronRight, Check, PhoneOutgoing } from "lucide-react"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
 import { Input } from "@/components/ui/input"
@@ -24,8 +24,8 @@ import { OwnerCombobox } from "@/components/ui/owner-combobox"
 import { MessageInput } from "@/components/message-input"
 import { ReferralPartnerCompanyCombobox } from "@/components/ui/referral-partner-company-combobox"
 import { VOBForm } from "@/components/vob-form"
-import { CallButton } from "@/components/call/call-button"
 import { toast } from 'react-hot-toast'
+import emitter from "@/lib/event-emitter"
 
 type UserRole = Database['public']['Tables']['users']['Row']['role']
 type FollowUpType = 'email' | 'sms' | 'call' | 'meeting' | 'tour'
@@ -1138,11 +1138,30 @@ export default function CustomerDetailPage() {
           </div>
           <div className="flex items-center gap-2">
             {customer?.phone && (
-              <CallButton 
-                phoneNumber={customer.phone}
-                variant="outline"
-                size="default"
-              />
+              <Button 
+                 variant="outline"
+                 size="sm" 
+                 onClick={() => {
+                   if (customer?.phone) {
+                     console.log(`[User Page] Emitting initiate-call for ${customer.phone}`);
+                     emitter.emit('initiate-call', { 
+                       phoneNumber: customer.phone, 
+                       contactInfo: { 
+                         id: customer.id, 
+                         name: getCustomerDisplayName(customer) 
+                       }
+                     });
+                     toast.success('Initiating call via Phone HUD...'); // Give user feedback
+                   } else {
+                     toast.error("Customer has no phone number.");
+                   }
+                 }}
+                 title={"Call Customer via Phone HUD"}
+                 className="border-green-600 text-green-600 hover:bg-green-600 hover:text-white disabled:opacity-50 disabled:cursor-not-allowed"
+               >
+                 <PhoneOutgoing className="h-4 w-4 mr-2" />
+                 Call
+              </Button>
             )}
             <Button 
               asChild 

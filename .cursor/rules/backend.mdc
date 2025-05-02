@@ -91,8 +91,27 @@ When a call comes in, the system:
    - Sets initial status as 'ringing'
    - Forwards the call to all available group members
 
-##### 2. Status Callback Handling (`/api/twiml/status/route.ts`)
-The system receives status updates for both parent and child calls:
+##### 2. Status Callback Handling (`/api/twiml/status/route.ts` and `/api/twilio/status/route.ts`)
+Twilio sends status updates (initiated, ringing, answered, completed, etc.) to these webhook endpoints. The request payload includes `CallSid` and potentially `ParentCallSid`.
+
+###### Callback Processing Logic:
+1.  **Identify Target Record:** The system attempts to find the relevant call record in the `calls` table:
+    *   First, it queries using the `CallSid` from the payload.
+    *   If no record is found and `ParentCallSid` is present in the payload, it queries using the `ParentCallSid`.
+    *   If neither query finds a matching record, an error is logged, and the process stops for that callback (though Twilio still receives an acknowledgment).
+2.  **Update Found Record:** If a record is found (either via `CallSid` or `ParentCallSid`), that *specific* record is updated:
+    *   The `status` field is updated to match the `CallStatus` from the payload.
+    *   If the status is `answered` and the payload includes a `client` identifier (for Twilio Client calls), the system looks up the corresponding user ID and updates the `to_user_id` field on the call record.
+    *   If the status is `completed`, the `duration`, `recording_url`, etc., are added to the call record.
+3.  **Create Communication Record:**
+    *   A record is added to the `communications` table *only* when the `CallStatus` is `completed`.
+    *   The communication record is created based on the final data of the *found and updated* call record (the one identified in step 1 and updated in step 2).
+    *   The `agent_id` and `user_id` for the communication record are determined based on the call direction and the user IDs present in the updated call record.
+
+###### Key Implications:
+*   Status updates (like duration, recordings, answering user) are always applied to the specific call record found via the SID lookup (direct or parent).
+*   Communication records are generated based on the outcome of the *found* call, linking the communication log to the call record that was actually updated with completion details.
+*   This handles scenarios where initial callbacks might refer to a parent SID, while later callbacks (like 'answered' or 'completed' for a specific agent leg) refer to the child SID.
 
 ###### Status Updates
 - `initiated`/`ringing`: Updates the call record status
