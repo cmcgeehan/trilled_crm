@@ -1,12 +1,14 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback } from "react"
-import { Phone, PhoneOff, PhoneOutgoing, Circle, Clock, Timer } from "lucide-react"
+import { Phone, PhoneOff, PhoneOutgoing, Circle, Mic, Grid } from "lucide-react"
 import { supabase } from "@/lib/supabase"
 import { VoiceService } from "@/services/voice.service"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
+import { Toggle as LiquidToggle } from '@/components/ui/liquid-toggle'
 import { cn, AgentStatus } from "@/lib/utils"
 import { useRouter } from 'next/navigation'
 import type { RealtimeChannel } from '@supabase/realtime-js'
@@ -389,8 +391,7 @@ export function PhoneHUD() {
        connection.on('accept', (conn: TwilioConnectionLike) => {
          console.log('[HUD Connection Event] accept');
          processCallSetup(conn);
-       });      
-       connection.on('ringing', (hasEarlyMedia: boolean) => { 
+       });       connection.on('ringing', (hasEarlyMedia: boolean) => { 
             console.log(`[HUD Connection Event] ringing - Early media: ${hasEarlyMedia}`);
             // Attempt setup on ringing as SID might be available now
             processCallSetup(connection);
@@ -782,25 +783,30 @@ export function PhoneHUD() {
   }, [cleanupCallState, syncAgentStatusWithBackend, handleCallEnd]); // Dependencies for handleEndCall
 
   const handleStatusChange = useCallback(async (newStatus: AgentStatus) => {
-    const currentStatus = status; 
-    if (currentStatus === AgentStatus.BUSY && newStatus !== AgentStatus.BUSY) {
-      toast.error("Cannot change status manually while BUSY.");
+    setStatus(newStatus);
+    await syncAgentStatusWithBackend(newStatus);
+  }, [syncAgentStatusWithBackend]);
+
+  const handleLiquidToggleChange = (isOn: boolean) => {
+    // Prevent changes if busy (toggle is now visually disabled, but good to double-check)
+    const currentStatus = statusRef.current;
+    if (currentStatus === AgentStatus.BUSY) {
+      console.warn("Attempted to toggle status while BUSY or WRAP_UP");
       return;
     }
-    if (currentStatus === newStatus) return;
 
-    console.log(`[HUD] User changing status from ${currentStatus} to: ${newStatus}`);
-    setStatus(newStatus);
-
-    try {
-      await voiceService.current?.updateAvailability(newStatus);
-      await syncAgentStatusWithBackend(newStatus);
-    } catch (error) {
-      console.error(`[HUD] Failed to update availability to ${newStatus}. Reverting local state.`, error as Error);
-      setStatus(currentStatus); // Revert local state on failure
-      toast.error(`Failed to update status: ${(error as Error).message}`);
+    // Only proceed if the target status is different and the transition is valid
+    if (isOn) { // Toggled to ON (Available)
+      if (currentStatus === AgentStatus.UNAVAILABLE || currentStatus === AgentStatus.WRAP_UP) {
+        handleStatusChange(AgentStatus.AVAILABLE);
+      }
+    } else { // Toggled to OFF (Unavailable)
+      if (currentStatus === AgentStatus.AVAILABLE) {
+        handleStatusChange(AgentStatus.UNAVAILABLE);
+      } 
+      // Do nothing if toggled OFF when already UNAVAILABLE or WRAP_UP
     }
-  }, [status, syncAgentStatusWithBackend]); // Dependencies for handleStatusChange
+  };
 
   // Use local isLoading state
   if (isLoading) { 
@@ -815,159 +821,201 @@ export function PhoneHUD() {
   }
 
   // --- Render Original UI structure with Local State ---
-  return (
-    <div
-      ref={hudRef}
-      className="fixed flex flex-col items-start gap-1 z-50" 
-      style={{ left: `${position.x}px`, top: `${position.y}px` }}
-    >
-      {/* Call Info Display: Use local state */} 
-      {(activeCall || incomingCall) && incomingCallInfo && (
-        <div className="bg-white p-2 rounded-lg shadow-lg text-xs mb-1 w-full max-w-[200px] truncate">
-          <p className="font-medium truncate">
-            {incomingCallInfo.callerName || incomingCallInfo.callerNumber}
-          </p>
-          <p className="text-muted-foreground truncate">
-            {activeCall
-              ? <span className="flex items-center"><Timer className="h-3 w-3 mr-1"/>{formatDuration(callDurationSeconds)}</span> 
-              : incomingCallInfo.isDirectLine
-                ? 'Incoming Direct'
-                : `Incoming: ${incomingCallInfo.groupName || 'Group'}`}
-          </p>
-        </div>
-      )}
+  const getStatusText = () => {
+    switch (status) {
+        case AgentStatus.AVAILABLE: return "Available";
+        case AgentStatus.BUSY: return "Busy";
+        case AgentStatus.WRAP_UP: return "Wrap Up";
+        case AgentStatus.UNAVAILABLE: return "Unavailable";
+        default: return "Unknown";
+      }
+  }
 
-      {/* Button Container */} 
+  return (
+    <TooltipProvider>
       <div
-        className="flex items-center gap-1 bg-white p-1 rounded-lg shadow-lg cursor-move"
+        ref={hudRef}
+        className={cn(
+          "fixed z-50 p-3 rounded-lg shadow-lg bg-card border flex flex-col items-center space-y-3 cursor-grab transition-all duration-100 ease-out",
+          isDragging ? "cursor-grabbing scale-105 shadow-xl" : ""
+        )}
+        style={{ left: `${position.x}px`, top: `${position.y}px` }}
         onMouseDown={handleDragStart}
       >
-        {/* Status Buttons: Use local status & handleStatusChange */} 
-        <Button
-          variant="ghost"
-          size="icon"
-          title="Available"
-          className={cn(
-            "h-7 w-7 rounded-full",
-            status === AgentStatus.AVAILABLE && "bg-green-100 text-green-600 hover:bg-green-200",
-            status !== AgentStatus.AVAILABLE && "text-gray-400 hover:bg-gray-100"
-          )}
-          onClick={() => handleStatusChange(AgentStatus.AVAILABLE)} 
-          disabled={status === AgentStatus.AVAILABLE || status === AgentStatus.BUSY}
-        >
-          <Circle className="h-4 w-4" />
-        </Button>
+        {/* Status Indicator */}
+        <div className="flex items-center space-x-2 w-full justify-center mb-2">
+           <Tooltip>
+            <TooltipTrigger asChild>
+              <Circle className={cn("h-4 w-4 fill-current",
+                  status === AgentStatus.AVAILABLE ? "text-green-500" :
+                  status === AgentStatus.BUSY ? "text-red-500" :
+                  status === AgentStatus.WRAP_UP ? "text-yellow-500" :
+                  "text-gray-500"
+              )} />
+            </TooltipTrigger>
+            <TooltipContent>
+              <p>Status: {getStatusText()}</p>
+            </TooltipContent>
+          </Tooltip>
+           <span className="text-sm font-medium">{getStatusText()}</span>
+        </div>
 
-        {status === AgentStatus.WRAP_UP && (
-          <Button
-            variant="ghost"
-            size="icon"
-            title="Wrap Up"
-            className={cn(
-              "h-7 w-7 rounded-full bg-orange-100 text-orange-600 cursor-not-allowed"
+        {/* Call Info Display */}
+        {(activeCall || incomingCall) && (
+          <div className="text-center mb-2 p-2 bg-muted rounded-md w-full">
+            {incomingCall && !activeCall && (
+              <>
+                 <p className="text-sm font-semibold">{incomingCallInfo?.callerName ?? "Unknown Caller"}</p>
+                <p className="text-xs text-muted-foreground">{incomingCallInfo?.callerNumber}</p>
+                {incomingCallInfo?.isDirectLine === false && (
+                  <p className="text-xs text-blue-500"> (Group: {incomingCallInfo?.groupName})</p>
+                )}
+              </>
             )}
-            disabled
-          >
-            <Clock className="h-4 w-4" />
-          </Button>
-        )}
-
-        <Button
-          variant="ghost"
-          size="icon"
-          title="Unavailable"
-          className={cn(
-            "h-7 w-7 rounded-full",
-            status === AgentStatus.UNAVAILABLE && "bg-gray-100 text-gray-600 hover:bg-gray-200",
-            status !== AgentStatus.UNAVAILABLE && status !== AgentStatus.WRAP_UP && "text-gray-400 hover:bg-gray-100"
-          )}
-          onClick={() => handleStatusChange(AgentStatus.UNAVAILABLE)} 
-          disabled={status === AgentStatus.BUSY || status === AgentStatus.UNAVAILABLE}
-        >
-          <PhoneOff className="h-4 w-4" />
-        </Button>
-
-        <div className="h-5 w-px bg-gray-200 mx-1"></div>
-
-        {/* Call Action Buttons: Use local state & original handlers */} 
-        {incomingCall ? (
-          <>
-            <Button
-              variant="ghost"
-              size="icon"
-              title="Answer Call"
-              className="h-7 w-7 rounded-full bg-green-100 text-green-600 hover:bg-green-200"
-              onClick={handleAnswerCall} 
-            >
-              <Phone className="h-4 w-4" />
-            </Button>
-            <Button
-              variant="ghost"
-              size="icon"
-              title="Reject Call"
-              className="h-7 w-7 rounded-full bg-red-100 text-red-600 hover:bg-red-200"
-              onClick={handleRejectCall} 
-            >
-              <PhoneOff className="h-4 w-4" />
-            </Button>
-          </>
-        ) : activeCall ? (
-          <>
-            <Button
-              variant="ghost"
-              size="icon"
-              title="End Call"
-              className="h-7 w-7 rounded-full bg-red-100 text-red-600 hover:bg-red-200"
-              onClick={handleEndCall} 
-            >
-              <PhoneOff className="h-4 w-4" />
-            </Button>
-          </>
-        ) : (
-          <>
-            {/* This button opens the original direct dialer dialog */} 
-            <Button
-              variant="ghost"
-              size="icon"
-              title="Make Call (Direct Dial)"
-              className="h-7 w-7 rounded-full text-blue-600 hover:bg-blue-100"
-              onClick={() => setShowCallDialog(true)} 
-              // Disable button based on local status/call state
-              disabled={status !== AgentStatus.AVAILABLE || !!activeCall || !!incomingCall}
-            >
-              <Phone className="h-4 w-4" />
-            </Button>
-          </>
-        )}
-      </div>
-
-      {/* Original Dialer Dialog */} 
-      <Dialog open={showCallDialog} onOpenChange={setShowCallDialog}>
-        <DialogContent className="sm:max-w-[425px]">
-          <DialogHeader>
-            <DialogTitle>Make a Call</DialogTitle>
-          </DialogHeader>
-          
-          <div className="space-y-4">
-            <div className="flex gap-2">
-              <Input
-                type="tel"
-                placeholder="Enter phone number"
-                value={phoneNumber} 
-                onChange={(e) => setPhoneNumber(e.target.value)} 
-              />
-              {/* Disable button based on local status/call state */} 
-              <Button 
-                onClick={handleMakeCall} // Calls makeCallFromEvent(phoneNumber)
-                disabled={!phoneNumber || status !== AgentStatus.AVAILABLE || !!activeCall || !!incomingCall}
-              > 
-                <PhoneOutgoing className="h-4 w-4 mr-2" />
-                Call
-              </Button>
-            </div>
+            {activeCall && (
+               <>
+                 <p className="text-sm font-semibold">{activeCall.parameters.To ? `Calling ${activeCall.parameters.To}` : incomingCallInfo?.callerName ?? "Connected"}</p>
+                 <p className="text-xs text-muted-foreground">{formatDuration(callDurationSeconds)}</p>
+               </>
+            )}
           </div>
-        </DialogContent>
-      </Dialog>
-    </div>
+        )}
+
+        {/* Action Buttons Row */}
+        <div className="flex space-x-2 items-center">
+
+          {/* Incoming Call: Answer / Reject */}
+          {incomingCall && !activeCall && (
+            <>
+               <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="rounded-full w-12 h-12 bg-green-100 hover:bg-green-200"
+                    onClick={handleAnswerCall}
+                  >
+                    <Phone className="h-6 w-6 text-green-600" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>Answer Call</TooltipContent>
+              </Tooltip>
+               <Tooltip>
+                 <TooltipTrigger asChild>
+                   <Button
+                    variant="ghost"
+                    size="icon"
+                    className="rounded-full w-12 h-12 bg-red-100 hover:bg-red-200"
+                    onClick={handleRejectCall}
+                    >
+                     <PhoneOff className="h-6 w-6 text-red-600" />
+                   </Button>
+                 </TooltipTrigger>
+                 <TooltipContent>Reject Call</TooltipContent>
+               </Tooltip>
+            </>
+          )}
+
+          {/* Active Call: Hangup / Mute / Keypad? */}
+          {activeCall && (
+            <>
+              <Tooltip>
+                 <TooltipTrigger asChild>
+                    {/* Example Mute Button - Functionality TBD */}
+                    <Button variant="ghost" size="icon" className="rounded-full w-12 h-12 hover:bg-gray-200">
+                        <Mic className="h-6 w-6 text-gray-700" />
+                    </Button>
+                 </TooltipTrigger>
+                 <TooltipContent>Mute</TooltipContent>
+               </Tooltip>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  {/* Example Keypad Button - Functionality TBD */}
+                  <Button variant="ghost" size="icon" className="rounded-full w-12 h-12 hover:bg-gray-200">
+                    <Grid className="h-6 w-6 text-gray-700" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>Keypad</TooltipContent>
+              </Tooltip>
+               <Tooltip>
+                 <TooltipTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="rounded-full w-12 h-12 bg-red-100 hover:bg-red-200"
+                    onClick={handleEndCall}
+                  >
+                    <PhoneOff className="h-6 w-6 text-red-600" />
+                  </Button>
+                 </TooltipTrigger>
+                 <TooltipContent>Hang Up</TooltipContent>
+               </Tooltip>
+             </>
+          )}
+
+          {/* Idle State: Status Toggle / Dialpad */}
+           {!incomingCall && !activeCall && (
+             <>
+               {/* Liquid Toggle for Status */}
+               <LiquidToggle
+                 checked={status === AgentStatus.AVAILABLE}
+                 onCheckedChange={handleLiquidToggleChange}
+                 disabled={status === AgentStatus.BUSY}
+                 variant={status === AgentStatus.AVAILABLE ? 'success' : 'default'}
+               />
+ 
+               {/* Dialpad Button */}
+               <Tooltip>
+                 <TooltipTrigger asChild>
+                   <Button
+                     variant="ghost"
+                     size="icon"
+                     className={cn(
+                       "rounded-full w-12 h-12",
+                       status === AgentStatus.AVAILABLE ? "hover:bg-green-100" : "hover:bg-gray-200"
+                     )}
+                     onClick={() => setShowCallDialog(true)}
+                     disabled={status === AgentStatus.UNAVAILABLE || status === AgentStatus.BUSY}
+                   >
+                     <PhoneOutgoing className={cn("h-6 w-6",
+                       (status === AgentStatus.UNAVAILABLE || status === AgentStatus.BUSY) ? "text-red-500" :
+                       status === AgentStatus.AVAILABLE ? "text-green-600" : "text-gray-700"
+                     )} />
+                   </Button>
+                 </TooltipTrigger>
+                <TooltipContent>Make a Call</TooltipContent>
+               </Tooltip>
+             </>
+           )}
+        </div>
+
+        {/* Direct Dial Dialog */}
+        <Dialog open={showCallDialog} onOpenChange={setShowCallDialog}>
+          <DialogContent className="sm:max-w-[425px]">
+            <DialogHeader>
+              <DialogTitle>Make a Call</DialogTitle>
+            </DialogHeader>
+            
+            <div className="space-y-4">
+              <div className="flex gap-2">
+                <Input
+                  type="tel"
+                  placeholder="Enter phone number"
+                  value={phoneNumber} 
+                  onChange={(e) => setPhoneNumber(e.target.value)} 
+                />
+                <Button 
+                  onClick={handleMakeCall}
+                  disabled={!phoneNumber || status !== AgentStatus.AVAILABLE || !!activeCall || !!incomingCall}
+                > 
+                  <PhoneOutgoing className="h-4 w-4 mr-2" />
+                  Call
+                </Button>
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
+      </div>
+    </TooltipProvider>
   );
 } 

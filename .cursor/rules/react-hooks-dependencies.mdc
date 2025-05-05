@@ -1,0 +1,101 @@
+---
+description: 
+globs: **/*.jsx,**/*.tsx
+alwaysApply: false
+---
+# React Hook Dependency Management
+
+## Overview
+
+This rule provides guidance on correctly managing dependency arrays for React hooks like `useEffect` and `useCallback` to prevent common issues, particularly infinite re-render loops, often encountered when fetching data and updating state.
+
+## Problem: Infinite Loops
+
+Incorrect dependencies can lead to infinite loops:
+
+1.  A `useEffect` hook fetches data and sets state (e.g., `setCustomer(data)`).
+2.  Another hook (or the same one) depends on the *entire* state object (`customer`). When the state is set, this dependent hook re-runs.
+3.  If the dependent hook causes the original data-fetching function reference to change (e.g., the fetch function is in `useCallback` and depends on state updated by the second hook), the first `useEffect` re-runs because its dependency (the function reference) changed.
+4.  This creates a cycle: Fetch -> Set State -> Trigger Dependent Effect -> Update State/Cause Fetch Function Change -> Trigger Fetch Effect -> Fetch...
+
+**Example Loop:**
+
+```typescript
+// Inside component:
+const [agents, setAgents] = useState([]);
+const [customer, setCustomer] = useState(null);
+
+// Incorrect: loadCustomer depends on 'agents', which loadAgents updates
+const loadCustomer = useCallback(async () => {
+  // ... fetch customer ...
+  // ... uses 'agents' state ...
+  setCustomer(customerData);
+}, [id, agents]); // Problem: depends on agents
+
+const loadAgents = useCallback(async () => {
+  // ... fetch agents ...
+  setAgents(agentData);
+}, []);
+
+// Incorrect: Effect depends on loadCustomer AND calls loadAgents
+useEffect(() => {
+  loadCustomer();
+  loadAgents();
+}, [id, loadCustomer, loadAgents]); // Problem: loadCustomer changes when agents change
+```
+
+## Solution: Correct Dependency Management
+
+1.  **`useCallback` Dependencies:** Only include variables that, when changed, *should* create a new version of the function. Avoid including state variables that the function itself sets indirectly, if possible. If a function needs state updated elsewhere (like `agents` needed by `loadCustomer`), consider if it's acceptable for the function *not* to have the absolute latest version on its first run after the dependency changes, or refactor how the state is used/passed.
+2.  **`useEffect` Dependencies:**
+    *   Make dependencies *minimal*. If an effect should only run when an ID changes, use `[id]`.
+    *   If an effect calls functions defined with `useCallback`, include those functions in the dependency array *only if* the effect needs to re-run when the function definition changes (which `useCallback` is designed to prevent unless *its* dependencies change). Often, you only need the `id` or other stable identifiers.
+    *   For data loading effects that also set up subscriptions, ensure the effect only depends on stable identifiers like `[id]`. Define subscription setup/cleanup functions *inside* the effect to avoid needing them as dependencies.
+
+**Example Fix:**
+
+```typescript
+// Inside component:
+const [agents, setAgents] = useState([]);
+const [customer, setCustomer] = useState(null);
+
+// Corrected: loadCustomer no longer depends on 'agents' directly in useCallback
+// It will use the 'agents' state available in the component's scope when it runs.
+const loadCustomer = useCallback(async () => {
+  // ... fetch customer ...
+  // ... uses 'agents' state ... (will use current value)
+  setCustomer(customerData);
+}, [id]); // Correct: Only depends on id (or other stable deps)
+
+const loadAgents = useCallback(async () => {
+  // ... fetch agents ...
+  setAgents(agentData);
+}, []);
+
+// Corrected: Effect depends ONLY on 'id'.
+// Load functions are stable due to useCallback.
+// Subscription handlers defined inside.
+useEffect(() => {
+  // Load initial data
+  loadCustomer();
+  loadAgents();
+
+  // Define subscription handlers INSIDE the effect
+  const setupSubscription = () => { /* ... */ };
+  const setupCallSubscription = () => { /* ... */ };
+
+  // Activate subscriptions
+  const channel = setupSubscription();
+  const callChannel = setupCallSubscription();
+
+  // Cleanup
+  return () => {
+    channel?.unsubscribe();
+    callChannel?.unsubscribe();
+  };
+}, [id]); // Correct: Only depends on id
+```
+
+## Key Takeaway
+
+Be mindful of what causes function references wrapped in `useCallback` to change and what `useEffect` hooks depend on. Minimize dependencies to only what's necessary to trigger the effect's re-run. Avoid dependency cycles between data fetching, state updates, and effect triggers.

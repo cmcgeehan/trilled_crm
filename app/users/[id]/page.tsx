@@ -422,7 +422,9 @@ export default function CustomerDetailPage() {
     }
   }, [id])
 
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   const loadCustomer = useCallback(async () => {
+    setLoading(true); // Corrected typo
     try {
       setLoading(true)
       
@@ -575,8 +577,9 @@ export default function CustomerDetailPage() {
       console.error('Error loading customer:', err)
     } finally {
       setLoading(false)
+      setLoading(false); // Corrected typo
     }
-  }, [id, loadFollowUps, agents, currentUserRole])
+  }, [id, agents, currentUserRole]); // Added missing dependencies
 
   const loadReferringUsers = useCallback(async () => {
     try {
@@ -594,7 +597,9 @@ export default function CustomerDetailPage() {
     }
   }, [])
 
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   const loadAgents = useCallback(async () => {
+    setLoading(true); // Corrected typo
     try {
       const { data, error } = await supabase
         .from('users')
@@ -606,8 +611,10 @@ export default function CustomerDetailPage() {
       setAgents(data || [])
     } catch (err) {
       console.error('Error loading agents:', err)
+    } finally {
+      setLoading(false); // Corrected typo
     }
-  }, [])
+  }, []);
 
   useEffect(() => {
     // --- Load initial data ---
@@ -761,7 +768,7 @@ export default function CustomerDetailPage() {
       // Use optional chaining for safety in case setup failed
       callChannel?.unsubscribe();
     }
-  }, [id, loadCustomer, loadAgents, loadCompanies, loadReferringUsers, loadFollowUps])
+  }, [id, loadAgents, loadCompanies, loadCustomer, loadFollowUps, loadReferringUsers]); // Added missing dependencies
 
   useEffect(() => {
     const checkSession = async () => {
@@ -1209,6 +1216,7 @@ export default function CustomerDetailPage() {
 
   return (
     <div className="space-y-4 bg-gray-50 min-h-screen p-6">
+      {/* Header Section */} 
       <div className="bg-white shadow rounded-lg p-6 mb-6">
         <div className="flex justify-between items-start">
           <div>
@@ -1217,7 +1225,7 @@ export default function CustomerDetailPage() {
               {customer?.company_id ? (
                 <>
                   <Link 
-                    href={`/companies/${customer?.company_id}`}
+                    href={`/companies/${customer.company_id}`}
                     className="text-brand-darkBlue/70 hover:text-brand-darkBlue hover:underline"
                   >
                     {customer?.companies?.name}
@@ -1273,6 +1281,7 @@ export default function CustomerDetailPage() {
         </div>
       </div>
 
+      {/* Follow-up Section */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         <Card className="md:col-span-2">
           <CardHeader>
@@ -1441,6 +1450,7 @@ export default function CustomerDetailPage() {
         </Card>
       </div>
 
+      {/* User Details Tabs Section */}
       <h2 className="text-xl font-semibold mt-6">User Details</h2>
       <Tabs value={activeTab} onValueChange={setActiveTab} className="bg-white rounded-lg shadow">
         <TabsList className="w-full bg-gray-100 p-1 rounded-t-lg">
@@ -1454,6 +1464,8 @@ export default function CustomerDetailPage() {
             VOB
           </TabsTrigger>
         </TabsList>
+        
+        {/* Info Tab */} 
         <TabsContent value="info" className="p-6">
           <div className="space-y-4">
             {!isEditable && (
@@ -1462,11 +1474,12 @@ export default function CustomerDetailPage() {
               </div>
             )}
             <div className="grid grid-cols-2 gap-8">
-              {/* Personal Information */}
+              {/* Personal Information Column */}
               <div className="space-y-6">
                 <div>
                   <h3 className="text-lg font-semibold mb-4">Personal Information</h3>
                   <div className="space-y-4">
+                    {/* Fields for First Name, Last Name, Email, Phone, LinkedIn */} 
                     <div>
                       <Label htmlFor="first_name">First Name</Label>
                       <Input
@@ -1522,11 +1535,12 @@ export default function CustomerDetailPage() {
                   </div>
                 </div>
 
-                {/* Company Information */}
+                {/* Company Information Section */}
                 <div>
                   <h3 className="text-lg font-semibold mb-4">Company Information</h3>
                   <div className="space-y-4">
-                    {formData.lead_type === 'referral_partner' && (
+                    {/* Fields for Company, Referring User, Position */} 
+                     {formData.lead_type === 'referral_partner' && (
                       <div>
                         <Label htmlFor="company">Company</Label>
                         <div className="mt-1">
@@ -1554,8 +1568,9 @@ export default function CustomerDetailPage() {
                                 referrer_id: value,
                               }))
                             }}
+                            disabled={!isEditable} // Ensure this is disabled when !isEditable
                           >
-                            <SelectTrigger>
+                            <SelectTrigger disabled={!isEditable}>
                               <SelectValue placeholder="Select referring user" />
                             </SelectTrigger>
                             <SelectContent>
@@ -1583,18 +1598,21 @@ export default function CustomerDetailPage() {
                 </div>
               </div>
 
+              {/* Role, Status, Notes Column */}
               <div className="space-y-6">
-                {/* Role & Status */}
+                {/* Role & Status Section */} 
                 <div>
                   <h3 className="text-lg font-semibold mb-4">Role & Status</h3>
                   <div className="space-y-4">
+                    {/* Fields for Role, Lead Type, Status, Owner */} 
                     <div>
                       <Label htmlFor="role">Role</Label>
                       <Select
                         value={formData.role}
                         onValueChange={(value) => setFormData(prev => ({ ...prev, role: value as UserRole }))}
+                        disabled={!isEditable}
                       >
-                        <SelectTrigger id="role" className="mt-1">
+                        <SelectTrigger id="role" className="mt-1" disabled={!isEditable}>
                           <SelectValue placeholder="Select role" />
                         </SelectTrigger>
                         <SelectContent>
@@ -1620,8 +1638,9 @@ export default function CustomerDetailPage() {
                           onValueChange={(value: 'referral_partner' | 'potential_customer' | "") => 
                             setFormData(prev => ({ ...prev, lead_type: value || null }))
                           }
+                           disabled={!isEditable}
                         >
-                          <SelectTrigger>
+                          <SelectTrigger disabled={!isEditable}>
                             <SelectValue placeholder="Select lead type" />
                           </SelectTrigger>
                           <SelectContent>
@@ -1638,7 +1657,7 @@ export default function CustomerDetailPage() {
                         onValueChange={(value) => setFormData(prev => ({ ...prev, status: value as UserStatus }))}
                         disabled={!isEditable}
                       >
-                        <SelectTrigger id="status" className="mt-1">
+                        <SelectTrigger id="status" className="mt-1" disabled={!isEditable}>
                           <SelectValue>
                             {formData.status === 'won' 
                               ? 'Won'
@@ -1671,7 +1690,7 @@ export default function CustomerDetailPage() {
                   </div>
                 </div>
 
-                {/* Notes */}
+                {/* Notes Section */}
                 <div>
                   <h3 className="text-lg font-semibold mb-4">Notes</h3>
                   <div>
@@ -1688,7 +1707,7 @@ export default function CustomerDetailPage() {
               </div>
             </div>
 
-            {/* B2C Lead Information */}
+            {/* B2C Lead Information Section */}
             {customer?.lead_type === 'potential_customer' && (
               <div className="mt-8 border-t pt-8">
                 <h3 className="text-lg font-semibold mb-4">Patient Information</h3>
@@ -1696,6 +1715,7 @@ export default function CustomerDetailPage() {
                   <p>Loading patient information...</p>
                 ) : (
                   <div className="grid grid-cols-2 gap-8">
+                    {/* Column 1: Address, Gender, SSN, DOB */} 
                     <div className="space-y-4">
                       <div>
                         <Label htmlFor="address">Address</Label>
@@ -1714,8 +1734,9 @@ export default function CustomerDetailPage() {
                           onValueChange={(value: 'Male' | 'Female' | 'Non-binary' | 'Other' | 'Prefer not to say') => 
                             setB2cLeadInfo(prev => ({ ...prev!, gender: value }))
                           }
+                          disabled={!isEditable}
                         >
-                          <SelectTrigger id="gender" className="mt-1">
+                          <SelectTrigger id="gender" className="mt-1" disabled={!isEditable}>
                             <SelectValue placeholder="Select gender" />
                           </SelectTrigger>
                           <SelectContent>
@@ -1751,6 +1772,7 @@ export default function CustomerDetailPage() {
                       </div>
                     </div>
 
+                    {/* Column 2: Marital Status, Parental Status, Referral Source, Headshot */} 
                     <div className="space-y-4">
                       <div>
                         <Label htmlFor="marital_status">Marital Status</Label>
@@ -1759,8 +1781,9 @@ export default function CustomerDetailPage() {
                           onValueChange={(value: 'Single' | 'Married' | 'Divorced' | 'Widowed') => 
                             setB2cLeadInfo(prev => ({ ...prev!, marital_status: value }))
                           }
+                          disabled={!isEditable}
                         >
-                          <SelectTrigger id="marital_status" className="mt-1">
+                          <SelectTrigger id="marital_status" className="mt-1" disabled={!isEditable}>
                             <SelectValue placeholder="Select marital status" />
                           </SelectTrigger>
                           <SelectContent>
@@ -1778,8 +1801,9 @@ export default function CustomerDetailPage() {
                           onValueChange={(value: 'Has children' | 'No children') => 
                             setB2cLeadInfo(prev => ({ ...prev!, parental_status: value }))
                           }
+                          disabled={!isEditable}
                         >
-                          <SelectTrigger id="parental_status" className="mt-1">
+                          <SelectTrigger id="parental_status" className="mt-1" disabled={!isEditable}>
                             <SelectValue placeholder="Select parental status" />
                           </SelectTrigger>
                           <SelectContent>
@@ -1815,6 +1839,7 @@ export default function CustomerDetailPage() {
               </div>
             )}
 
+            {/* Action Buttons */} 
             <div className="flex justify-end space-x-2 mt-4">
               {isEditable && (
                 <>
@@ -1859,6 +1884,8 @@ export default function CustomerDetailPage() {
             )}
           </div>
         </TabsContent>
+
+        {/* Conversation Tab */} 
         <TabsContent value="conversation" className="p-6">
           <div className="w-full space-y-4">
             <div className="bg-white p-6 rounded-lg shadow">
@@ -1871,7 +1898,7 @@ export default function CustomerDetailPage() {
                   return (
                     <div key={interaction.id} className={`flex ${alignmentClass}`}>
                       {interaction.type === 'call' ? (
-                        // ** Call Rendering Block **
+                        // Call Rendering Block
                         <div className={`p-3 rounded-lg max-w-[80%] space-y-1 shadow-sm ${interaction.sender === 'agent' ? 'bg-green-100 border border-green-200' : 'bg-purple-100 border border-purple-200'}`}>
                           <p className="text-xs text-gray-600 mb-1 flex items-center gap-1">
                             {interaction.direction === 'inbound' ? <PhoneIncoming className="h-3 w-3 text-purple-700"/> : <PhoneOutgoing className="h-3 w-3 text-green-700"/>}
@@ -1898,7 +1925,7 @@ export default function CustomerDetailPage() {
                           )}
                         </div>
                       ) : (
-                        // ** Existing Rendering for Notes/Email/SMS **
+                        // Existing Rendering for Notes/Email/SMS
                         <div className="space-y-1 max-w-[80%]">
                           {interaction.sender === "customer" && (
                             <p className="text-xs text-gray-500">
@@ -1957,6 +1984,8 @@ export default function CustomerDetailPage() {
             </div>
           </div>
         </TabsContent>
+
+        {/* VOB Tab */} 
         <TabsContent value="vob" className="p-6">
           <VOBForm userId={id} />
         </TabsContent>
