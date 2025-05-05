@@ -57,14 +57,6 @@ type FollowUp = Database['public']['Tables']['follow_ups']['Row'] & {
   lost_reason?: string | null
 }
 
-type Case = {
-  id: number
-  status: string
-  createdAt: string
-  type: string
-  interactions: Interaction[]
-}
-
 type Interaction = {
   id: string;
   type: 'internal' | 'email' | 'sms' | 'call' | 'meeting' | 'tour';
@@ -134,12 +126,10 @@ export default function CustomerDetailPage() {
   const id = params?.id as string;
   
   // State hooks
-  const [activeTab, setActiveTab] = useState('cases');
+  const [activeTab, setActiveTab] = useState('conversation'); // Default to conversation tab
   const [customer, setCustomer] = useState<Customer | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | React.ReactNode | null>(null);
-  const [activeCase, setActiveCase] = useState<Case | null>(null);
-  const [cases, setCases] = useState<Case[]>([]);
   const [responseChannel, setResponseChannel] = useState("internal");
   const [responseMessage, setResponseMessage] = useState("");
   const [followUps, setFollowUps] = useState<FollowUp[]>([]);
@@ -149,6 +139,7 @@ export default function CustomerDetailPage() {
   const [currentUserRole, setCurrentUserRole] = useState<UserRole | null>(null);
   const [isEditable, setIsEditable] = useState<boolean>(false);
   const [companies, setCompanies] = useState<Database['public']['Tables']['companies']['Row'][]>([]);
+  const [interactions, setInteractions] = useState<Interaction[]>([]); // New state for interactions
   const [formData, setFormData] = useState<FormData>({
     first_name: "",
     last_name: "",
@@ -574,16 +565,8 @@ export default function CustomerDetailPage() {
         .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
       console.log('[loadCustomer] Combined allInteractions:', JSON.stringify(allInteractions, null, 2)); // Log combined list
 
-      // Create a case with the combined interactions
-      const mockCase: Case = {
-        id: 1, // Use a more stable ID if multiple cases are possible
-        status: customerObject.status || "New", // Use customer status?
-        createdAt: customerObject.created_at || new Date().toISOString(),
-        type: "General", // Or derive from interactions?
-        interactions: allInteractions
-      }
-      setCases([mockCase])
-      setActiveCase(mockCase)
+      // Set the combined interactions directly to state
+      setInteractions(allInteractions);
 
       // Load follow-ups
       await loadFollowUps()
@@ -593,7 +576,7 @@ export default function CustomerDetailPage() {
     } finally {
       setLoading(false)
     }
-  }, [id, loadFollowUps, currentUserRole, agents]) // Added agents to dependency array
+  }, [id, loadFollowUps, agents, currentUserRole])
 
   const loadReferringUsers = useCallback(async () => {
     try {
@@ -627,12 +610,13 @@ export default function CustomerDetailPage() {
   }, [])
 
   useEffect(() => {
+    // --- Load initial data ---
     loadCustomer()
     loadAgents()
     loadCompanies()
     loadReferringUsers()
 
-    // Set up real-time subscription for communications with retry logic
+    // --- Define subscription handlers IN the effect ---
     let retryCount = 0
     const maxRetries = 3
     const retryDelay = 5000 // 5 seconds
@@ -652,6 +636,7 @@ export default function CustomerDetailPage() {
           (payload) => {
             console.log('Received communication change:', payload)
             loadCustomer() // Reload all data when communications change
+            loadFollowUps() // Also reload followups explicitly
           }
         )
         .subscribe((status, err) => {
@@ -681,8 +666,8 @@ export default function CustomerDetailPage() {
               
               // Set up new retry
               retryTimeout = setTimeout(() => {
-                channel.unsubscribe()
-                setupSubscription()
+                channel?.unsubscribe() // Use optional chaining
+                setupSubscription() // Call the function defined within this effect scope
               }, retryDelay * Math.pow(2, retryCount - 1)) // Exponential backoff
             } else {
               console.error('Max retries reached, subscription failed')
@@ -697,9 +682,6 @@ export default function CustomerDetailPage() {
       return channel
     }
 
-    const channel = setupSubscription()
-
-    // ---- NEW: Set up real-time subscription for calls ----
     let callRetryCount = 0;
     const maxCallRetries = 3;
     const callRetryDelay = 5000; 
@@ -719,6 +701,7 @@ export default function CustomerDetailPage() {
           (payload) => {
             console.log('Received call change:', payload)
             loadCustomer() // Reload all data when calls change
+            loadFollowUps() // Also reload followups explicitly
           }
         )
         .subscribe((status, err) => {
@@ -743,8 +726,8 @@ export default function CustomerDetailPage() {
               if (callRetryTimeout) clearTimeout(callRetryTimeout);
               
               callRetryTimeout = setTimeout(() => {
-                callChannel.unsubscribe(); // Unsubscribe before retry
-                setupCallSubscription();
+                callChannel?.unsubscribe(); // Use optional chaining
+                setupCallSubscription(); // Call the function defined within this effect scope
               }, callRetryDelay * Math.pow(2, callRetryCount - 1)); 
             } else {
               console.error('[Calls] Max retries reached, subscription failed')
@@ -759,25 +742,26 @@ export default function CustomerDetailPage() {
       return callChannel;
     }
 
+    // --- Activate subscriptions ---
+    const channel = setupSubscription() 
     const callChannel = setupCallSubscription();
-    // ---- END NEW ----
 
-    // Cleanup subscription and any pending retries on unmount
+    // --- Cleanup ---
     return () => {
       console.log('Cleaning up subscriptions')
       if (retryTimeout) {
         clearTimeout(retryTimeout)
       }
-      channel.unsubscribe()
+      // Use optional chaining for safety in case setup failed
+      channel?.unsubscribe()
 
-      // ---- NEW: Cleanup call subscription ----
       if (callRetryTimeout) {
         clearTimeout(callRetryTimeout);
       }
-      callChannel.unsubscribe();
-      // ---- END NEW ----
+      // Use optional chaining for safety in case setup failed
+      callChannel?.unsubscribe();
     }
-  }, [id, loadCustomer, loadCompanies, loadReferringUsers, loadAgents])
+  }, [id, loadCustomer, loadAgents, loadCompanies, loadReferringUsers, loadFollowUps])
 
   useEffect(() => {
     const checkSession = async () => {
@@ -815,12 +799,14 @@ export default function CustomerDetailPage() {
       }
     }
     checkSession()
-  }, [router, customer])
+  }, [router, customer?.id, customer?.role])
 
   useEffect(() => {
     const tab = searchParams?.get("tab") || ''
     if (tab === "cases") {
-      setActiveTab("cases")
+      setActiveTab("conversation") // Change default tab check value
+    } else if (tab) {
+      setActiveTab(tab) // Handle other potential tabs
     }
   }, [searchParams])
 
@@ -858,23 +844,18 @@ export default function CustomerDetailPage() {
 
         if (error) throw error
 
-        // Update the UI by adding the new note to the active case
-        if (activeCase) {
-          const newInteraction: Interaction = {
-            id: `comm-${Date.now()}`, // Temporary ID for UI update
-            type: 'internal',
-            date: format(new Date(), 'MMM d, yyyy h:mm a'),
-            content: responseMessage.trim(),
-            sender: 'agent',
-            agentName: session.user.email || '',
-            createdAt: new Date() // Add creation timestamp
-          }
-
-          setActiveCase(prev => prev ? {
-            ...prev,
-            interactions: [...prev.interactions, newInteraction]
-          } : null)
+        // Update the UI by adding the new note to the interactions list
+        const newInteraction: Interaction = {
+          id: `comm-${Date.now()}`, // Temporary ID for UI update
+          type: 'internal',
+          date: format(new Date(), 'MMM d, yyyy h:mm a'),
+          content: responseMessage.trim(),
+          sender: 'agent',
+          agentName: session.user.email || '',
+          createdAt: new Date() // Add creation timestamp
         }
+
+        setInteractions(prevInteractions => [...prevInteractions, newInteraction].sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime()));
 
         // Clear the message after successful send
         setResponseMessage("")
@@ -920,7 +901,7 @@ export default function CustomerDetailPage() {
             },
             body: JSON.stringify({
               to: customer.email,
-              subject: `Re: Case #${activeCase?.id || 'New'}`,
+              subject: `Message regarding ${getCustomerDisplayName(customer)}`,
               content: responseMessage.trim()
             })
           })
@@ -969,22 +950,17 @@ export default function CustomerDetailPage() {
           if (commError) throw commError
 
           // Update the UI
-          if (activeCase) {
-            const newInteraction: Interaction = {
-              id: `email-${Date.now()}`, // Temporary ID for UI update
-              type: 'email',
-              date: format(new Date(), 'MMM d, yyyy h:mm a'),
-              content: responseMessage.trim(),
-              sender: 'agent',
-              agentName: session.user.email || '',
-              createdAt: new Date() // Add creation timestamp
-            }
-
-            setActiveCase(prev => prev ? {
-              ...prev,
-              interactions: [...prev.interactions, newInteraction]
-            } : null)
+          const newEmailInteraction: Interaction = {
+            id: `email-${Date.now()}`, // Temporary ID for UI update
+            type: 'email',
+            date: format(new Date(), 'MMM d, yyyy h:mm a'),
+            content: responseMessage.trim(),
+            sender: 'agent',
+            agentName: session.user.email || '',
+            createdAt: new Date() // Add creation timestamp
           }
+
+          setInteractions(prevInteractions => [...prevInteractions, newEmailInteraction].sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime()));
 
           // Clear the message only after successful send
           setResponseMessage("")
@@ -1471,8 +1447,8 @@ export default function CustomerDetailPage() {
           <TabsTrigger value="info" className="flex-1 data-[state=active]:bg-white data-[state=active]:shadow-sm">
             Face Sheet
           </TabsTrigger>
-          <TabsTrigger value="cases" className="flex-1 data-[state=active]:bg-white data-[state=active]:shadow-sm">
-            Cases
+          <TabsTrigger value="conversation" className="flex-1 data-[state=active]:bg-white data-[state=active]:shadow-sm">
+            Conversation
           </TabsTrigger>
           <TabsTrigger value="vob" className="flex-1 data-[state=active]:bg-white data-[state=active]:shadow-sm">
             VOB
@@ -1883,148 +1859,102 @@ export default function CustomerDetailPage() {
             )}
           </div>
         </TabsContent>
-        <TabsContent value="cases" className="p-6">
-          <div className="flex space-x-6">
-            <div className="w-1/3 bg-gray-100 p-4 rounded-lg space-y-4 max-h-[800px] overflow-y-auto">
-              <h2 className="text-lg font-semibold">Cases</h2>
-              {cases.map((c) => (
-                <div key={c.id} className="space-y-2">
-                  <Button
-                    variant={c === activeCase ? "default" : "outline"}
-                    className={`w-full justify-start items-center ${
-                      c === activeCase ? "bg-blue-100 text-blue-800" : "bg-white"
-                    }`}
-                    onClick={() => setActiveCase(c)}
-                  >
-                    <div className="flex justify-between items-center w-full">
-                      <span>Case {c.id}</span>
-                      <Badge
-                        variant="secondary"
-                        className={`ml-2 text-xs ${c === activeCase ? "bg-blue-200 text-blue-800" : ""}`}
-                      >
-                        {c.type}
-                      </Badge>
-                    </div>
-                  </Button>
-                  {c === activeCase && (
-                    <div className="bg-white p-3 rounded-md text-sm space-y-2 border border-blue-200">
-                      <div className="flex justify-between items-center">
-                        <span className="font-medium">Status</span>
-                        <span className="text-gray-600">{c.status}</span>
-                      </div>
-                      <div className="flex justify-between items-center">
-                        <span className="font-medium">Created</span>
-                        <span className="text-gray-600">{formatDateSafe(c.createdAt)}</span>
-                      </div>
-                      <div className="flex justify-between items-center">
-                        <span className="font-medium">Type</span>
-                        <Badge variant="outline" className="text-xs">
-                          {c.type}
-                        </Badge>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              ))}
-            </div>
-            {activeCase && (
-              <div className="w-2/3 space-y-4">
-                <div className="bg-white p-6 rounded-lg shadow">
-                  <h2 className="text-lg font-semibold mb-4">Conversation History</h2>
-                  <div className="space-y-4 max-h-[800px] overflow-y-auto bg-gray-50 p-4 rounded-lg">
-                    {activeCase.interactions.map((interaction: Interaction) => {
-                      // Determine alignment based on sender
-                      const alignmentClass = interaction.sender === "agent" ? "justify-end" : "justify-start";
+        <TabsContent value="conversation" className="p-6">
+          <div className="w-full space-y-4">
+            <div className="bg-white p-6 rounded-lg shadow">
+              <h2 className="text-lg font-semibold mb-4">Conversation History</h2>
+              <div className="space-y-4 max-h-[800px] overflow-y-auto bg-gray-50 p-4 rounded-lg">
+                {interactions.map((interaction: Interaction) => {
+                  // Determine alignment based on sender
+                  const alignmentClass = interaction.sender === "agent" ? "justify-end" : "justify-start";
 
-                      return (
-                        <div key={interaction.id} className={`flex ${alignmentClass}`}>
-                          {interaction.type === 'call' ? (
-                            // ** Call Rendering Block **
-                            <div className={`p-3 rounded-lg max-w-[80%] space-y-1 shadow-sm ${interaction.sender === 'agent' ? 'bg-green-100 border border-green-200' : 'bg-purple-100 border border-purple-200'}`}>
-                              <p className="text-xs text-gray-600 mb-1 flex items-center gap-1">
-                                {interaction.direction === 'inbound' ? <PhoneIncoming className="h-3 w-3 text-purple-700"/> : <PhoneOutgoing className="h-3 w-3 text-green-700"/>}
-                                <span className="font-medium">{interaction.date}</span>
-                                <span className="font-semibold capitalize ml-1"> - {interaction.direction} Call</span>
-                                {interaction.agentName && interaction.sender === 'agent' && (
-                                  <span className="ml-auto text-right font-medium"> (Agent: {interaction.agentName})</span>
-                                )}
-                              </p>
-                              <p className="text-sm text-gray-800">{interaction.content}</p>
-                              <div className="flex justify-between items-center text-xs text-gray-600 pt-1 gap-4">
-                                <span>Status: <Badge variant="secondary" className="text-xs capitalize">{interaction.callStatus || '-'}</Badge></span>
-                                {interaction.duration && <span>Duration: {interaction.duration}</span>}
-                              </div>
-                              {interaction.recordingUrl && (
-                                <Button
-                                  variant="outline"
-                                  size="sm"
-                                  className="mt-2 w-full justify-center text-xs bg-white hover:bg-gray-50"
-                                  onClick={() => window.open(interaction.recordingUrl, '_blank')}
-                                >
-                                  <Play className="mr-1 h-3 w-3" /> Play Recording
-                                </Button>
-                              )}
-                            </div>
-                          ) : (
-                            // ** Existing Rendering for Notes/Email/SMS **
-                            <div className="space-y-1 max-w-[80%]">
-                              {interaction.sender === "customer" && (
-                                <p className="text-xs text-gray-500">
-                                  {interaction.type === "email"
-                                    ? customer?.email
-                                    : interaction.type === "sms"
-                                      ? customer?.phone
-                                      : ""}
-                                </p>
-                              )}
-                              {interaction.sender === "agent" && interaction.agentName && (
-                                <p className="text-xs text-gray-500 text-right">
-                                  Agent: {interaction.agentName} via{" "}
-                                  {interaction.type === "email"
-                                    ? "Email"
-                                    : interaction.type === "sms"
-                                      ? "SMS"
-                                      : interaction.type === "internal"
-                                        ? "Internal Note"
-                                        : interaction.type}
-                                </p>
-                              )}
-                              <div
-                                className={`p-3 rounded-lg shadow-sm ${
-                                  interaction.type === "internal"
-                                    ? "bg-yellow-100 border border-yellow-200 w-full" // Keep internal full width and distinct
-                                    : interaction.sender === "agent"
-                                      ? "bg-blue-100 border border-blue-200" // Agent messages
-                                      : "bg-gray-100 border border-gray-200" // Customer messages
-                                }`}
-                              >
-                                <p className="text-xs text-gray-500 mb-1">
-                                  {interaction.date}
-                                  {interaction.type === "internal" && " - Internal Note"}
-                                </p>
-                                <p className="text-sm text-gray-800">{interaction.content}</p>
-                              </div>
-                            </div>
+                  return (
+                    <div key={interaction.id} className={`flex ${alignmentClass}`}>
+                      {interaction.type === 'call' ? (
+                        // ** Call Rendering Block **
+                        <div className={`p-3 rounded-lg max-w-[80%] space-y-1 shadow-sm ${interaction.sender === 'agent' ? 'bg-green-100 border border-green-200' : 'bg-purple-100 border border-purple-200'}`}>
+                          <p className="text-xs text-gray-600 mb-1 flex items-center gap-1">
+                            {interaction.direction === 'inbound' ? <PhoneIncoming className="h-3 w-3 text-purple-700"/> : <PhoneOutgoing className="h-3 w-3 text-green-700"/>}
+                            <span className="font-medium">{interaction.date}</span>
+                            <span className="font-semibold capitalize ml-1"> - {interaction.direction} Call</span>
+                            {interaction.agentName && interaction.sender === 'agent' && (
+                              <span className="ml-auto text-right font-medium"> (Agent: {interaction.agentName})</span>
+                            )}
+                          </p>
+                          <p className="text-sm text-gray-800">{interaction.content}</p>
+                          <div className="flex justify-between items-center text-xs text-gray-600 pt-1 gap-4">
+                            <span>Status: <Badge variant="secondary" className="text-xs capitalize">{interaction.callStatus || '-'}</Badge></span>
+                            {interaction.duration && <span>Duration: {interaction.duration}</span>}
+                          </div>
+                          {interaction.recordingUrl && (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="mt-2 w-full justify-center text-xs bg-white hover:bg-gray-50"
+                              onClick={() => window.open(interaction.recordingUrl, '_blank')}
+                            >
+                              <Play className="mr-1 h-3 w-3" /> Play Recording
+                            </Button>
                           )}
                         </div>
-                      );
-                    })}
-                  </div>
-                  <div className="mt-4">
-                    <MessageInput
-                      value={responseMessage}
-                      onChange={setResponseMessage}
-                      onSubmit={handleSendResponse}
-                      placeholder="Type your response... (Press / to use templates)"
-                      customer={customer}
-                      className="mt-2"
-                      responseChannel={responseChannel}
-                      onResponseChannelChange={setResponseChannel}
-                    />
-                  </div>
-                </div>
+                      ) : (
+                        // ** Existing Rendering for Notes/Email/SMS **
+                        <div className="space-y-1 max-w-[80%]">
+                          {interaction.sender === "customer" && (
+                            <p className="text-xs text-gray-500">
+                              {interaction.type === "email"
+                                ? customer?.email
+                                : interaction.type === "sms"
+                                  ? customer?.phone
+                                  : ""}
+                            </p>
+                          )}
+                          {interaction.sender === "agent" && interaction.agentName && (
+                            <p className="text-xs text-gray-500 text-right">
+                              Agent: {interaction.agentName} via{" "}
+                              {interaction.type === "email"
+                                ? "Email"
+                                : interaction.type === "sms"
+                                  ? "SMS"
+                                  : interaction.type === "internal"
+                                    ? "Internal Note"
+                                    : interaction.type}
+                            </p>
+                          )}
+                          <div
+                            className={`p-3 rounded-lg shadow-sm ${
+                              interaction.type === "internal"
+                                ? "bg-yellow-100 border border-yellow-200 w-full" // Keep internal full width and distinct
+                                : interaction.sender === "agent"
+                                  ? "bg-blue-100 border border-blue-200" // Agent messages
+                                  : "bg-gray-100 border border-gray-200" // Customer messages
+                            }`}
+                          >
+                            <p className="text-xs text-gray-500 mb-1">
+                              {interaction.date}
+                              {interaction.type === "internal" && " - Internal Note"}
+                            </p>
+                            <p className="text-sm text-gray-800">{interaction.content}</p>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
-            )}
+              <div className="mt-4">
+                <MessageInput
+                  value={responseMessage}
+                  onChange={setResponseMessage}
+                  onSubmit={handleSendResponse}
+                  placeholder="Type your response... (Press / to use templates)"
+                  customer={customer}
+                  className="mt-2"
+                  responseChannel={responseChannel}
+                  onResponseChannelChange={setResponseChannel}
+                />
+              </div>
+            </div>
           </div>
         </TabsContent>
         <TabsContent value="vob" className="p-6">

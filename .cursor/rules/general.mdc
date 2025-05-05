@@ -1,14 +1,3 @@
----
-description: 
-globs: 
-alwaysApply: true
----
----
-description: Core information for the build of this project, relevant to all work
-globs: ["**/*.{tsx,ts}", "!**/*.test.{tsx,ts}", "!**/*.spec.{tsx,ts}"]
-alwaysApply: true
----
-
 # General Documentation
 
 ## Overview
@@ -63,9 +52,6 @@ This document provides general information about the CRM system, its architectur
      - Document any changes to behavior or interface
      - Consider scope and accessibility
      - Check for naming conflicts
-- Keep files focused and single-purpose
-- Use meaningful file and folder names that reflect their content
-- Before implementing new features or processes:
 - Keep files focused and single-purpose
 - Use meaningful file and folder names that reflect their content
 - Before implementing new features or processes:
@@ -162,6 +148,7 @@ See `.env.example` for required environment variables.
   - Related Files:
     - `components/phone/phone-hud.tsx` - UI for phone functionality
     - `services/voice.service.ts` - Core voice service implementation
+    - `app/users/[id]/page.tsx` - Displays combined conversation history (notes & calls)
 
 ### State Management
 - **Current Solution**: React Context + Local State
@@ -211,5 +198,47 @@ When making significant architectural decisions or implementing new patterns:
    - Implementing new services
    - Modifying core architecture 
 
+# General Development Guidelines
 
+## Function Creation and Modification
+
+When encountering a function-related issue:
+
+1. **Search First**: Always search the codebase for existing function implementations before creating new ones:
+   ```typescript
+   // Use grep_search for exact matches
+   grep_search("functionName")
    
+   // Use codebase_search for semantic matches
+   codebase_search("function description or purpose")
+   ```
+
+2. **Analyze Existing**: If the function exists:
+   - Review its current implementation
+   - Check where and how it's being used
+   - Identify any potential scope or access issues
+   - Look for related functions or dependencies
+
+3. **Modify vs Create**: 
+   - Only create a new function if a thorough search confirms it doesn't exist
+   - If modifying an existing function, ensure changes don't break existing usage
+   - Document any changes to function behavior or interface
+
+4. **Scope and Context**:
+   - Consider the function's scope (global, module, component)
+   - Check for potential naming conflicts
+   - Verify the function is accessible where it's being called
+
+5. **Error Handling**:
+   - If a function appears to be missing but exists, investigate:
+     - Scope issues
+     - Import/export problems
+     - TypeScript compilation errors
+     - Caching issues
+
+// ... rest of existing content ... 
+     - Import/export problems
+     - TypeScript compilation errors
+     - Caching issues
+
+// ... rest of existing content ... 
