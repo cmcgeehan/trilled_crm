@@ -2,13 +2,12 @@ import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import VoiceResponse from 'twilio/lib/twiml/VoiceResponse';
 
-// Initialize Supabase client
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
-
 export async function POST(request: Request) {
+  const supabase = createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!
+  );
+
   try {
     console.log('Inbound call received');
     const formData = await request.formData();
@@ -242,14 +241,27 @@ export async function POST(request: Request) {
         console.log(`Redirecting to sequential dial: ${redirectUrl}`);
         twiml.redirect({ method: 'POST' }, redirectUrl);
 
-        // Update the initial call record status to indicate redirection
-        // Note: The sequential dialer might update this further.
-        await supabase
+        // --- Create Parent Call Record (BEFORE Redirect/Dial) --- 
+        console.log(`[TwiML Inbound] Creating parent call record for group ${group.id} with SID ${formData.get('CallSid')}`);
+        const { error: parentCallError } = await supabase
           .from('calls')
-          .update({ status: 'redirecting-to-sequential' }) 
-          .eq('call_sid', parentCallSid);
-          // Consider if the initial insert needs modification too, or if this update is sufficient.
-          // We might still need the initial insert from before this block.
+          .insert({
+            call_sid: formData.get('CallSid') as string,
+            from_number: fromNumber,
+            to_number: calledNumber,
+            from_user_id: fromUserId, // Initiating user ID (if found)
+            to_user_id: null, // No specific user answered yet
+            status: 'ringing', // Initial status
+            direction: 'inbound',
+            is_parent_call: true, // Mark as parent call
+            group_id: group.id, // *** ADDED group_id ***
+            started_at: new Date().toISOString()
+          });
+        if (parentCallError) {
+          console.error('[TwiML Inbound] Error creating parent call record (before seq dial):', parentCallError);
+          // Handle error appropriately, maybe don't redirect?
+        }
+        // End Parent Call Record Creation
 
         // No need to dial or create another call record here, the redirect handles it.
         return new NextResponse(twiml.toString(), {
@@ -261,23 +273,6 @@ export async function POST(request: Request) {
       }
 
       // --- Agents are available ---
-
-      // Create call record for group call (parent call)
-      const { error: callError } = await supabase
-        .from('calls')
-        .insert({
-          call_sid: formData.get('CallSid') as string,
-          from_number: fromNumber,
-          to_number: calledNumber,
-          from_user_id: fromUserId,
-          group_id: group.id,
-          status: 'initiated',
-          started_at: new Date().toISOString()
-        });
-
-      if (callError) {
-        console.error('Error creating call record:', callError);
-      }
 
       // Generate TwiML to dial available agents
       // const twiml = new VoiceResponse(); // Moved up
@@ -309,9 +304,31 @@ export async function POST(request: Request) {
         }, userId);
       });
 
-      const twimlResponse = twiml.toString();
-      console.log('Generated TwiML for agent dial:', twimlResponse);
+      // --- Create Parent Call Record (BEFORE Dialing Agents) --- 
+      console.log(`[TwiML Inbound] Creating parent call record for group ${group.id} with SID ${formData.get('CallSid')}`);
+      const { error: parentCallError } = await supabase
+        .from('calls')
+        .insert({
+          call_sid: formData.get('CallSid') as string,
+          from_number: fromNumber,
+          to_number: calledNumber,
+          from_user_id: fromUserId, // Initiating user ID (if found)
+          to_user_id: null, // No specific user answered yet
+          status: 'ringing', // Initial status
+          direction: 'inbound',
+          is_parent_call: true, // Mark as parent call
+          group_id: group.id, // *** ADDED group_id ***
+          started_at: new Date().toISOString()
+        });
+      if (parentCallError) {
+        console.error('[TwiML Inbound] Error creating parent call record (before agent dial):', parentCallError);
+        // Handle error appropriately, maybe don't dial?
+      }
+      // End Parent Call Record Creation
 
+      const twimlResponse = twiml.toString();
+      console.log('Generated Group TwiML:', twimlResponse);
+      
       return new NextResponse(twimlResponse, {
         headers: {
           'Content-Type': 'text/xml; charset=utf-8',

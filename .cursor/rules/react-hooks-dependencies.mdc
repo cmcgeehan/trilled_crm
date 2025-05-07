@@ -5,6 +5,10 @@ alwaysApply: false
 ---
 # React Hook Dependency Management
 
+## Glob
+
+`**/*.{tsx,jsx}`
+
 ## Overview
 
 This rule provides guidance on correctly managing dependency arrays for React hooks like `useEffect` and `useCallback` to prevent common issues, particularly infinite re-render loops, often encountered when fetching data and updating state.

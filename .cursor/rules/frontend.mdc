@@ -1,9 +1,4 @@
 ---
-description: 
-globs: **/*.{tsx, "!**/*.test.{tsx, "!**/*.spec.{tsx
-alwaysApply: false
----
----
 description: Frontend development standards and patterns
 globs: ["**/*.{tsx,ts}", "!**/*.test.{tsx,ts}", "!**/*.spec.{tsx,ts}"]
 alwaysApply: true
@@ -38,3 +33,169 @@ alwaysApply: true
   - `Input`
   - `Dialog`
   - `Table`
+
+## State Management
+
+### Local State
+- Use React's `useState` for component-specific state
+- Keep state as close to where it's used as possible
+- Example:
+```typescript
+const [isOpen, setIsOpen] = useState(false);
+```
+
+### Context State
+- Use for truly global state
+- Create context providers in `components/providers/`
+- Examples:
+  - User authentication state
+  - Theme preferences
+  - Application-wide settings
+
+### Form State
+- Use React Hook Form for form management
+- Implement proper validation
+- Handle loading and error states
+- Example:
+```typescript
+const { register, handleSubmit, formState: { errors } } = useForm();
+```
+
+## Data Fetching
+
+### Client-Side Fetching
+- Use SWR or React Query for data fetching
+- Implement proper loading and error states
+- Cache data appropriately
+- Example:
+```typescript
+const { data, error, isLoading } = useSWR('/api/users', fetcher);
+```
+
+### Server-Side Rendering
+- Use Next.js 13+ server components where possible
+- Implement proper loading.tsx and error.tsx files
+- Handle data fetching in server components
+
+## Styling
+
+### Tailwind CSS
+- Use utility-first approach
+- Follow responsive design principles
+- Use consistent spacing and sizing
+- Example:
+```tsx
+<div className="flex items-center justify-between p-4">
+```
+
+### Custom Components
+- Extend shadcn/ui components when needed
+- Maintain consistent styling patterns
+- Use CSS variables for theming
+
+## Performance
+
+### Code Splitting
+- Use dynamic imports for large components
+- Implement proper loading states
+- Example:
+```typescript
+const DynamicComponent = dynamic(() => import('./HeavyComponent'));
+```
+
+### Optimization
+- Use React.memo() for expensive renders
+- Implement proper memoization
+- Use useCallback and useMemo appropriately
+- Example:
+```typescript
+const memoizedCallback = useCallback(() => {
+  // callback logic
+}, [dependencies]);
+```
+
+## Testing
+
+### Unit Testing
+- Use Jest and React Testing Library
+- Test component behavior, not implementation
+- Follow testing best practices
+- Example:
+```typescript
+test('button click triggers action', () => {
+  render(<Button onClick={mockFn} />);
+  fireEvent.click(screen.getByRole('button'));
+  expect(mockFn).toHaveBeenCalled();
+});
+```
+
+### Accessibility
+- Follow WCAG 2.1 guidelines
+- Use semantic HTML
+- Implement proper ARIA attributes
+- Test with screen readers
+- Example:
+```tsx
+<button aria-label="Close dialog" onClick={handleClose}>
+  <XIcon />
+</button>
+```
+
+## Error Handling
+
+### Error Boundaries
+- Implement at appropriate levels
+- Provide meaningful error messages
+- Include recovery options
+- Example:
+```typescript
+class ErrorBoundary extends React.Component {
+  // Error boundary implementation
+}
+```
+
+### Form Validation
+- Use Zod for schema validation
+- Provide clear error messages
+- Handle both client and server validation
+- Example:
+```typescript
+const schema = z.object({
+  email: z.string().email('Invalid email address'),
+  password: z.string().min(8, 'Password too short'),
+});
+```
+
+## Best Practices
+
+### Component Design
+- Keep components small and focused
+- Use composition over inheritance
+- Implement proper prop types
+- Handle loading and error states
+- Follow React best practices
+
+### Code Organization
+- Group related components
+- Use consistent file naming
+- Implement proper barrel exports
+- Example:
+```typescript
+// components/button/index.ts
+export * from './button';
+export * from './button.types';
+```
+
+### TypeScript Usage
+- Use strict type checking
+- Define interfaces for all props
+- Avoid using `any`
+- Leverage type inference
+- Example:
+```typescript
+interface ButtonProps {
+  variant: 'primary' | 'secondary';
+  onClick: () => void;
+  children: React.ReactNode;
+}
+``` 

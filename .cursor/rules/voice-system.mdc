@@ -1,16 +1,11 @@
 ---
-description: 
-globs: components/phone/**/*,services/voice.service.ts,lib/voice-service.ts,app/api/twiml/**/*
-alwaysApply: false
----
- ---
 description: Rules and guidelines for working with the voice system in our CRM
 globs: 
   - "components/phone/**/*"
   - "services/voice.service.ts"
   - "lib/voice-service.ts"
   - "app/api/twiml/**/*"
-alwaysApply: true
+alwaysApply: false
 ---
 # Voice System Rules
 
@@ -183,4 +178,4 @@ TWILIO_API_SECRET=
 2. Check Twilio webhook URLs
 3. Validate database migrations
 4. Test in staging environment
-5. Monitor error logs
+5. Monitor error logs 

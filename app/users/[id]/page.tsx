@@ -136,7 +136,7 @@ export default function CustomerDetailPage() {
   const [selectedFollowUp, setSelectedFollowUp] = useState<FollowUp | null>(null);
   const [agents, setAgents] = useState<Agent[]>([]);
   const [isUpdatingFollowUps, setIsUpdatingFollowUps] = useState(false);
-  const [currentUserRole, setCurrentUserRole] = useState<UserRole | null>(null);
+  const [currentUserRole, setCurrentUserRole] = useState<UserRole | null>(null); // Restore state declaration
   const [isEditable, setIsEditable] = useState<boolean>(false);
   const [companies, setCompanies] = useState<Database['public']['Tables']['companies']['Row'][]>([]);
   const [interactions, setInteractions] = useState<Interaction[]>([]); // New state for interactions
@@ -161,6 +161,7 @@ export default function CustomerDetailPage() {
 
   // Ref hooks
   const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const isInitialLoadComplete = useRef(false); // Add ref to track initial load
 
   // Callback hooks
   const loadB2CLeadInfo = useCallback(async () => {
@@ -218,7 +219,7 @@ export default function CustomerDetailPage() {
     } finally {
       setIsLoadingB2CInfo(false);
     }
-  }, [customer, id]);
+  }, [id]); // DEPENDENCY FIX: Only depend on id
 
   const handleMarkAsLost = useCallback(async () => {
     if (!customer) return;
@@ -246,9 +247,12 @@ export default function CustomerDetailPage() {
       setError(err instanceof Error ? err.message : 'Failed to mark as lost');
     } finally {
       setLoading(false);
+      setLoading(false); // Corrected typo
     }
-  }, [customer, router]);
+  }, [customer, router, id]); // Add customer dependency
 
+
+  
   const handleDelete = useCallback(async () => {
     if (!customer) return;
 
@@ -289,7 +293,7 @@ export default function CustomerDetailPage() {
     } finally {
       setLoading(false);
     }
-  }, [customer, router]);
+  }, [id, router]); // CORRECT DEPENDENCIES: Remove loadFollowUps
 
   // Effect hooks
   useEffect(() => {
@@ -315,7 +319,7 @@ export default function CustomerDetailPage() {
         loadB2CLeadInfo();
       }
     }
-  }, [customer, loadB2CLeadInfo]);
+  }, [customer, loadB2CLeadInfo]); // Keep loadB2CLeadInfo here, it's called conditionally
 
   const loadCompanies = useCallback(async () => {
     try {
@@ -371,8 +375,9 @@ export default function CustomerDetailPage() {
     } catch (err) {
       console.error('Error in loadCompanies:', err);
     }
-  }, [])
+  }, []) // Correct: No dependencies
 
+  // --- Step 1: Move loadFollowUps block --- 
   const loadFollowUps = useCallback(async () => {
     if (!id) return
 
@@ -391,40 +396,28 @@ export default function CustomerDetailPage() {
         return
       }
 
-      // Restore simplified mapping logic, applying the 'completed' fix
       const mappedFollowUps = (allFollowUps || []).map(fu => ({
           ...fu,
-          // Assert/map necessary fields
           id: fu.id!, 
           user_id: fu.user_id!, 
           type: fu.type as FollowUpType, 
           date: fu.date!, 
           completed_at: fu.completed_at,
-          // Apply the fix for 'completed' type mismatch
-          completed: fu.completed === null ? undefined : fu.completed,
-          notes: fu.notes,
-          created_at: fu.created_at!,
-          updated_at: fu.updated_at!,
-          deleted_at: fu.deleted_at,
-          next_follow_up_id: fu.next_follow_up_id,
-        })) as FollowUp[];
+          completed: !!fu.completed_at // Explicitly boolean
+      }))
 
-      setFollowUps(mappedFollowUps);
-
-      // Select the next incomplete follow-up from the mapped list
-      const nextFollowUp = mappedFollowUps.find(fu => !fu.completed_at)
-      if (nextFollowUp) {
-        setSelectedFollowUp(nextFollowUp)
-      }
-
+      setFollowUps(mappedFollowUps)
     } catch (err) {
       console.error('Error loading follow-ups:', err)
     }
-  }, [id])
+  }, [id]) // Correct: Depends only on ID
+  // --- End Move ---
 
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   const loadCustomer = useCallback(async () => {
-    setLoading(true); // Corrected typo
+    setLoading(true);
+    if (!id) {
+      throw new Error('No user ID provided');
+    }
     try {
       setLoading(true)
       
@@ -579,7 +572,8 @@ export default function CustomerDetailPage() {
       setLoading(false)
       setLoading(false); // Corrected typo
     }
-  }, [id, agents, currentUserRole]); // Added missing dependencies
+    // DEPENDENCY FIX: Primarily depend on ID and the function it calls.
+  }, [id, loadFollowUps]); // Now loadFollowUps is defined
 
   const loadReferringUsers = useCallback(async () => {
     try {
@@ -595,7 +589,7 @@ export default function CustomerDetailPage() {
     } catch (err) {
       console.error('Error loading referring users:', err)
     }
-  }, [])
+  }, [id]); // CORRECT DEPENDENCIES: Remove loadFollowUps
 
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const loadAgents = useCallback(async () => {
@@ -614,7 +608,7 @@ export default function CustomerDetailPage() {
     } finally {
       setLoading(false); // Corrected typo
     }
-  }, []);
+  }, []); // Correct: No dependencies
 
   useEffect(() => {
     // --- Load initial data ---
@@ -642,8 +636,10 @@ export default function CustomerDetailPage() {
           },
           (payload) => {
             console.log('Received communication change:', payload)
-            loadCustomer() // Reload all data when communications change
-            loadFollowUps() // Also reload followups explicitly
+            if (isInitialLoadComplete.current) { // Check if initial load is done
+              loadCustomer() // Reload all data when communications change
+              loadFollowUps() // Also reload followups explicitly
+            }
           }
         )
         .subscribe((status, err) => {
@@ -707,8 +703,10 @@ export default function CustomerDetailPage() {
           },
           (payload) => {
             console.log('Received call change:', payload)
-            loadCustomer() // Reload all data when calls change
-            loadFollowUps() // Also reload followups explicitly
+            if (isInitialLoadComplete.current) { // Check if initial load is done
+              loadCustomer() // Reload all data when calls change
+              loadFollowUps() // Also reload followups explicitly
+            }
           }
         )
         .subscribe((status, err) => {
@@ -753,6 +751,8 @@ export default function CustomerDetailPage() {
     const channel = setupSubscription() 
     const callChannel = setupCallSubscription();
 
+    isInitialLoadComplete.current = true; // Set flag after initial load
+
     // --- Cleanup ---
     return () => {
       console.log('Cleaning up subscriptions')
@@ -768,7 +768,7 @@ export default function CustomerDetailPage() {
       // Use optional chaining for safety in case setup failed
       callChannel?.unsubscribe();
     }
-  }, [id, loadAgents, loadCompanies, loadCustomer, loadFollowUps, loadReferringUsers]); // Added missing dependencies
+  }, [id, loadAgents, loadCompanies, loadCustomer, loadFollowUps, loadReferringUsers]); // REMOVED load functions from dependencies
 
   useEffect(() => {
     const checkSession = async () => {

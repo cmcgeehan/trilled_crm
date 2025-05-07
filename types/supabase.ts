@@ -111,6 +111,9 @@ export type Database = {
           from_user_id: string | null
           group_id: string | null
           id: string
+          is_parent_call: boolean | null
+          parent_call_sid: string | null
+          recording_sid: string | null
           recording_url: string | null
           started_at: string | null
           status: string
@@ -128,6 +131,9 @@ export type Database = {
           from_user_id?: string | null
           group_id?: string | null
           id?: string
+          is_parent_call?: boolean | null
+          parent_call_sid?: string | null
+          recording_sid?: string | null
           recording_url?: string | null
           started_at?: string | null
           status: string
@@ -145,6 +151,9 @@ export type Database = {
           from_user_id?: string | null
           group_id?: string | null
           id?: string
+          is_parent_call?: boolean | null
+          parent_call_sid?: string | null
+          recording_sid?: string | null
           recording_url?: string | null
           started_at?: string | null
           status?: string
